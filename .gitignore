@@ -17,6 +17,7 @@ captures/
 # 输出 APK
 app/build/
 *.apk
+!releases/*.apk
 
 # 系统/日志
 *.log

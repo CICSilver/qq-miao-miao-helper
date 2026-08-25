@@ -12,6 +12,8 @@ import java.util.regex.Pattern;
  * - 我 -> 本喵
  * - 在标点旁加喵（可选）
  * - 在末尾附加随机颜文字（可选）
+ *
+ * 关键：处理前会先剥离文本中已有的颜文字，避免重复叠加（防止"疯狂加颜表情"）。
  */
 public class TextProcessor {
 
@@ -35,7 +37,9 @@ public class TextProcessor {
         if (raw == null || raw.trim().isEmpty()) {
             return raw;
         }
-        String text = raw;
+
+        // 先剥离已有颜文字，避免重复叠加
+        String text = stripEmoticons(raw);
 
         // 1. 替换你 -> 主人
         if (config.isEnableNi()) {
@@ -52,18 +56,55 @@ public class TextProcessor {
             text = addMeowAfterPunctuation(text);
         }
 
-        // 4. 末尾随机颜文字
+        // 4. 末尾随机颜文字（只在处理才加一个）
         if (config.isEnableEmoticon()) {
-            text = text + " " + pickEmoticon();
+            String trimmed = text.trim();
+            String emoticon = pickEmoticon();
+            if (emoticon.isEmpty()) {
+                text = trimmed;
+            } else {
+                text = trimmed + " " + emoticon;
+            }
         }
 
         return text;
     }
 
     /**
+     * 剥离文本中出现的内置 + 自定义颜文字，返回去掉颜文字后的文本。
+     */
+    private String stripEmoticons(String text) {
+        List<String> pool = emoticonPool();
+        if (pool.isEmpty()) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (String e : pool) {
+            if (e == null || e.isEmpty()) {
+                continue;
+            }
+            if (!first) {
+                sb.append('|');
+            }
+            sb.append(Pattern.quote(e));
+            first = false;
+        }
+        if (sb.length() == 0) {
+            return text;
+        }
+        Pattern p = Pattern.compile(sb.toString());
+        Matcher m = p.matcher(text);
+        return m.replaceAll(" ").replaceAll("\\s+", " ").trim();
+    }
+
+    /**
      * 在标点句末添加"喵"。
      */
     private String addMeowAfterPunctuation(String text) {
+        if (text.isEmpty()) {
+            return text;
+        }
         Matcher matcher = PUNCTUATION_PATTERN.matcher(text);
         StringBuffer sb = new StringBuffer();
         while (matcher.find()) {
@@ -78,10 +119,23 @@ public class TextProcessor {
      * 抽取一个颜文字：优先用自定义库，否则用内置库。
      */
     private String pickEmoticon() {
+        List<String> pool = emoticonPool();
+        if (pool.isEmpty()) {
+            pool.addAll(CatConfig.BUILTIN_EMOTICONS);
+        }
+        if (pool.isEmpty()) {
+            return "";
+        }
+        return pool.get(random.nextInt(pool.size()));
+    }
+
+    /**
+     * 汇总自定义 + 内置颜文字库。
+     */
+    private List<String> emoticonPool() {
         List<String> pool = new ArrayList<>();
         String custom = config.getCustomEmoticons();
         if (custom != null && !custom.trim().isEmpty()) {
-            // 每行一个颜文字
             String[] lines = custom.split("\n");
             for (String line : lines) {
                 String t = line.trim();
@@ -93,6 +147,6 @@ public class TextProcessor {
         if (pool.isEmpty()) {
             pool.addAll(CatConfig.BUILTIN_EMOTICONS);
         }
-        return pool.get(random.nextInt(pool.size()));
+        return pool;
     }
 }

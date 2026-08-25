@@ -17,12 +17,14 @@ public class QQAccessibilityService extends AccessibilityService {
     private static final int MAX_DEPTH = 30;
 
     private TextProcessor processor;
-    private CatConfig config;
+    // 防回声：上一次我们通过 setText 写入的完整文本。若再次读到相同内容，
+    // 说明是该写入引发的回显事件，必须跳过，否则会无限循环追加颜文字。
+    private String lastWrittenText;
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        config = new CatConfig(this);
+        CatConfig config = new CatConfig(this);
         processor = new TextProcessor(config);
         Log.d(TAG, "无障碍服务已连接");
     }
@@ -57,9 +59,15 @@ public class QQAccessibilityService extends AccessibilityService {
         }
         String raw = text.toString();
 
+        // 防回声：读到的就是上次我们写入的内容，说明是回显事件，跳过。
+        if (raw.equals(lastWrittenText)) {
+            return;
+        }
+
         String processed = processor.process(raw);
         if (processed != null && !processed.equals(raw)) {
             Log.d(TAG, "替换: '" + raw + "' -> '" + processed + "'");
+            lastWrittenText = processed;
             setNodeText(input, processed);
         }
     }

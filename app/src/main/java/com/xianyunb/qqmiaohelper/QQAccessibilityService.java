@@ -3,122 +3,221 @@ package com.xianyunb.qqmiaohelper;
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /**
- * 无障碍服务：监听 QQ 聊天界面的输入框。
- * 当用户输入文本（或文本变化）时，自动将文本转换为喵喵语气并回写输入框。
+ * 无障碍服务：监听已勾选聊天软件的输入框。
+ * 按处理模式对用户输入的文本做喵喵语气转换并回写输入框。
+ * - 标点触发：仅在文本新增标点时处理，打字阶段不处理
+ * - 实时处理：停顿(去抖)后自动转换一次，不打断输入法组词推荐
  */
 public class QQAccessibilityService extends AccessibilityService {
 
     private static final String TAG = "QQMiao";
     private static final int MAX_DEPTH = 30;
 
+    // 实时处理模式的停顿时间（毫秒）：停这么长时间没有新输入才转换一次。
+    private static final long DEBOUNCE_MS = 700;
+
     private TextProcessor processor;
-    // 上一次我们处理并写入的文本。用于两件事：
-    // 1. 防回声：setText 触发的事件若读到的文本==此值，说明是回显，跳过。
-    // 2. 标点触发：仅在文本比这里"新增了标点"时才处理。
+    private CatConfig config;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable debounceRunnable = this::processIfApplicable;
+
+    // 最近一个待处理的文本（去抖期间捕获的最新状态）
+    private CharSequence pendingText;
+    private String pendingPkg;
+
+    // 状态：上一次处理写入的文本与标点计数
     private String lastProcessedText;
     private int lastProcessedPunctCount;
+
+    // 预取软件包名集合，减少重复读取配置
+    private Set<String> enabledPackages = new HashSet<>();
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        CatConfig config = new CatConfig(this);
+        reloadConfig();
+        Log.d(TAG, "无障碍服务已连接：监听软件包 = " + enabledPackages);
+    }
+
+    private void reloadConfig() {
+        config = new CatConfig(this);
         processor = new TextProcessor(config);
-        Log.d(TAG, "无障碍服务已连接");
+        enabledPackages = collectEnabledPackages();
+    }
+
+    private Set<String> collectEnabledPackages() {
+        Set<String> enabled = new HashSet<>();
+        Set<String> appNames = config.getEnabledApps();
+        for (ChatApps app : ChatApps.values()) {
+            if (appNames.contains(app.name())) {
+                for (String pkg : app.getPackageNames()) {
+                    enabled.add(pkg);
+                }
+            }
+        }
+        return enabled;
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (processor == null) {
+        if (processor == null || config == null) {
             return;
         }
 
-        int type = event.getEventType();
-        if (type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
-                && type != AccessibilityEvent.TYPE_VIEW_FOCUSED
-                && type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+        // 按来源包名过滤：只处理已勾选的聊天软件
+        String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
+        if (!enabledPackages.contains(pkg)) {
             return;
         }
 
-        AccessibilityNodeInfo root = getRootInActiveWindow();
-        if (root == null) {
+        // 文本变化：实时模式进入去抖；标点模式进行标点触发判断。
+        if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+            onTextChanged(pkg);
             return;
         }
 
-        AccessibilityNodeInfo input = findEditableNode(root);
-        if (input == null) {
-            return;
-        }
-
-        CharSequence text = input.getText();
-        if (text == null || text.length() == 0) {
-            // 清空输入框时重置状态
-            if (lastProcessedText != null) {
-                lastProcessedText = null;
-                lastProcessedPunctCount = 0;
+        // 窗口状态/内容变化：用于初次定位输入框或更新状态
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                || event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                || event.getEventType() == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
+            // 记录当前文本为空时清空状态
+            AccessibilityNodeInfo input = findFocusedInputNode();
+            if (input == null) {
+                return;
             }
+            CharSequence t = input.getText();
+            if (t == null || t.length() == 0) {
+                if (lastProcessedText != null) {
+                    lastProcessedText = null;
+                    lastProcessedPunctCount = 0;
+                }
+            }
+        }
+    }
+
+    private void onTextChanged(String pkg) {
+        int mode = config.getProcessingMode();
+        if (mode == CatConfig.MODE_REALTIME) {
+            // 实时模式：记录最新状态，重启去抖计时器
+            capturePending(pkg);
+            handler.removeCallbacks(debounceRunnable);
+            handler.postDelayed(debounceRunnable, DEBOUNCE_MS);
+        } else {
+            // 标点触发：立即检查标点是否新增
+            processImmediateIfPunctuation(pkg);
+        }
+    }
+
+    private void capturePending(String pkg) {
+        AccessibilityNodeInfo input = findFocusedInputNode();
+        if (input == null) {
+            pendingText = null;
+            pendingPkg = pkg;
             return;
         }
-        String raw = text.toString();
+        pendingText = input.getText();
+        pendingPkg = pkg;
+    }
 
+    private void processIfApplicable() {
+        if (pendingText == null) {
+            return;
+        }
+        String raw = pendingText.toString();
+        if (raw.isEmpty()) {
+            idleReset();
+            return;
+        }
         // 防回声：读到的正是上次写入的内容，跳过
         if (raw.equals(lastProcessedText)) {
             return;
         }
-
-        int mode = getProcessingMode();
-        if (mode == CatConfig.MODE_PUNCTUATION) {
-            // 标点触发：仅在文本新增标点时处理，打字阶段不处理
-            int punctCount = countPunctuation(raw);
-            if (punctCount == lastProcessedPunctCount) {
-                return;
-            }
-            lastProcessedPunctCount = punctCount;
+        // 处理时重新定位输入框（避免缓存节点失效），用包名辅助过滤
+        AccessibilityNodeInfo input = findFocusedInputNode();
+        if (input == null) {
+            return;
         }
-        // 实时模式：直接处理（只靠防回声避免循环）
+        transformAndWrite(input, raw, pendingPkg);
+    }
 
+    private void processImmediateIfPunctuation(String pkg) {
+        AccessibilityNodeInfo input = findFocusedInputNode();
+        if (input == null) {
+            return;
+        }
+        CharSequence t = input.getText();
+        if (t == null || t.length() == 0) {
+            idleReset();
+            return;
+        }
+        String raw = t.toString();
+        if (raw.equals(lastProcessedText)) {
+            return;
+        }
+        int punctCount = countPunctuation(raw);
+        if (punctCount == lastProcessedPunctCount) {
+            return;
+        }
+        lastProcessedPunctCount = punctCount;
+        transformAndWrite(input, raw, pkg);
+    }
+
+    private void transformAndWrite(AccessibilityNodeInfo input, String raw, String pkg) {
         String processed = processor.process(raw);
         if (processed != null && !processed.equals(raw)) {
-            Log.d(TAG, "处理: '" + raw + "' -> '" + processed + "'");
+            Log.d(TAG, "处理[" + pkg + "]: '" + raw + "' -> '" + processed + "'");
             lastProcessedText = processed;
             setNodeText(input, processed);
         }
     }
 
-    /**
-     * 读取当前处理模式（每次事件读取，便于主界面改动即时生效）。
-     */
-    private int getProcessingMode() {
-        try {
-            return new CatConfig(this).getProcessingMode();
-        } catch (Exception e) {
-            return CatConfig.MODE_PUNCTUATION;
-        }
+    private void idleReset() {
+        lastProcessedText = null;
+        lastProcessedPunctCount = 0;
     }
 
     /**
-     * 统计文本中出现的标点（。！？!?等）数量，用于标点触发判断。
+     * 优先查找当前聚焦的输入框；找不到则退回深度优先查找可编辑节点。
+     * 这样能避免在不同的聊天软件中抓到错误的输入控件（如搜索框）。
      */
-    private int countPunctuation(String s) {
-        int c = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char ch = s.charAt(i);
-            if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?' || ch == '，' || ch == ',' || ch == '；' || ch == ';') {
-                c++;
+    private AccessibilityNodeInfo findFocusedInputNode() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) {
+            return null;
+        }
+        // 1) 优先当前聚焦的可编辑节点
+        AccessibilityNodeInfo focused = dfsFocusedEditable(root, 0);
+        if (focused != null) {
+            return focused;
+        }
+        // 2) 兜底：第一个可编辑节点
+        return dfsEditable(root, 0);
+    }
+
+    private AccessibilityNodeInfo dfsFocusedEditable(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > MAX_DEPTH) {
+            return null;
+        }
+        if (node.isEditable() && node.isFocused()) {
+            return node;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo r = dfsFocusedEditable(node.getChild(i), depth + 1);
+            if (r != null) {
+                return r;
             }
         }
-        return c;
-    }
-
-    /**
-     * 深度优先查找处于可编辑状态的输入框节点。
-     */
-    private AccessibilityNodeInfo findEditableNode(AccessibilityNodeInfo node) {
-        return dfsEditable(node, 0);
+        return null;
     }
 
     private AccessibilityNodeInfo dfsEditable(AccessibilityNodeInfo node, int depth) {
@@ -126,9 +225,6 @@ public class QQAccessibilityService extends AccessibilityService {
             return null;
         }
         if (node.isEditable()) {
-            return node;
-        }
-        if (node.isFocused() && isEditText(node)) {
             return node;
         }
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -140,9 +236,15 @@ public class QQAccessibilityService extends AccessibilityService {
         return null;
     }
 
-    private boolean isEditText(AccessibilityNodeInfo node) {
-        CharSequence cn = node.getClassName();
-        return cn != null && cn.toString().toLowerCase().contains("edittext");
+    private int countPunctuation(String s) {
+        int c = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?' || ch == '，' || ch == ',' || ch == '；' || ch == ';') {
+                c++;
+            }
+        }
+        return c;
     }
 
     private void setNodeText(AccessibilityNodeInfo node, String text) {
@@ -165,6 +267,7 @@ public class QQAccessibilityService extends AccessibilityService {
 
     @Override
     public boolean onUnbind(Intent intent) {
+        handler.removeCallbacks(debounceRunnable);
         Log.d(TAG, "无障碍服务解绑");
         return super.onUnbind(intent);
     }

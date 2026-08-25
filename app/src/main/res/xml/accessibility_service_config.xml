@@ -4,5 +4,4 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:notificationTimeout="50"
-    android:packageNames="com.tencent.mobileqq,com.tencent.mobileqqi" />
+    android:notificationTimeout="50" />

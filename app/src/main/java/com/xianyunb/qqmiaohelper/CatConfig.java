@@ -20,6 +20,7 @@ public class CatConfig {
     public static final String KEY_ENABLE_EMOTICON = "enable_emoticon";
     public static final String KEY_PROCESSING_MODE = "processing_mode";
     public static final String KEY_CUSTOM_EMOTICONS = "custom_emoticons";
+    public static final String KEY_ENABLED_APPS = "enabled_apps";
 
     // 处理模式
     public static final int MODE_PUNCTUATION = 0; // 标点触发
@@ -84,5 +85,26 @@ public class CatConfig {
 
     public void setCustomEmoticons(String s) {
         prefs.edit().putString(KEY_CUSTOM_EMOTICONS, s).apply();
+    }
+
+    /**
+     * 获取已启用的软件（按枚举 name 存储）。默认启用 QQ。
+     */
+    public java.util.Set<String> getEnabledApps() {
+        java.util.Set<String> set = prefs.getStringSet(KEY_ENABLED_APPS, null);
+        if (set == null || set.isEmpty()) {
+            java.util.Set<String> def = new java.util.HashSet<>();
+            def.add(ChatApps.QQ.name());
+            return def;
+        }
+        return new java.util.HashSet<>(set);
+    }
+
+    public boolean isAppEnabled(ChatApps app) {
+        return getEnabledApps().contains(app.name());
+    }
+
+    public void setEnabledApps(java.util.Set<String> appNames) {
+        prefs.edit().putStringSet(KEY_ENABLED_APPS, new java.util.HashSet<>(appNames)).apply();
     }
 }

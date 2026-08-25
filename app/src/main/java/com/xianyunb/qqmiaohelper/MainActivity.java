@@ -59,6 +59,8 @@ public class MainActivity extends AppCompatActivity {
     private EditText edTest;
     private TextView tvStatus;
     private TextView tvPreview;
+    // 聊天软件多选开关（与 ChatApps.values() 顺序对应）
+    private final java.util.List<SwitchMaterial> appSwitches = new java.util.ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,6 +115,9 @@ public class MainActivity extends AppCompatActivity {
         // 服务卡片 1：状态
         root.addView(makeCard("服务状态", buildStatusCardBody()));
 
+        // 聊天软件
+        root.addView(makeCard("聊天软件", buildAppsSection()));
+
         // 功能开关
         root.addView(makeCard("功能开关", buildSwitches()));
 
@@ -153,6 +158,23 @@ public class MainActivity extends AppCompatActivity {
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
         p.topMargin = dp(14);
         inner.addView(btnOpen, p);
+        return inner;
+    }
+
+    private View buildAppsSection() {
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        appSwitches.clear();
+        for (ChatApps app : ChatApps.values()) {
+            SwitchMaterial sw = addSwitch(inner, app.getDisplayName());
+            appSwitches.add(sw);
+        }
+        TextView hint = new TextView(this);
+        hint.setText("勾选要启用喵喵语气的聊天软件");
+        hint.setTextSize(12);
+        hint.setTextColor(0xFF99AFC5);
+        hint.setPadding(0, dp(6), 0, 0);
+        inner.addView(hint);
         return inner;
     }
 
@@ -329,6 +351,12 @@ public class MainActivity extends AppCompatActivity {
         swEmoticon.setChecked(config.isEnableEmoticon());
         spinnerMode.setSelection(config.getProcessingMode());
         edCustom.setText(config.getCustomEmoticons());
+        // 加载聊天软件开关
+        java.util.Set<String> enabledApps = config.getEnabledApps();
+        ChatApps[] apps = ChatApps.values();
+        for (int i = 0; i < apps.length && i < appSwitches.size(); i++) {
+            appSwitches.get(i).setChecked(enabledApps.contains(apps[i].name()));
+        }
     }
 
     private void saveSettings() {
@@ -339,6 +367,15 @@ public class MainActivity extends AppCompatActivity {
         config.setProcessingMode(spinnerMode.getSelectedItemPosition() == 1
                 ? CatConfig.MODE_REALTIME : CatConfig.MODE_PUNCTUATION);
         config.setCustomEmoticons(edCustom.getText().toString());
+        // 保存聊天软件开关
+        java.util.Set<String> enabledApps = new java.util.HashSet<>();
+        ChatApps[] apps = ChatApps.values();
+        for (int i = 0; i < apps.length && i < appSwitches.size(); i++) {
+            if (appSwitches.get(i).isChecked()) {
+                enabledApps.add(apps[i].name());
+            }
+        }
+        config.setEnabledApps(enabledApps);
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
         processor = new TextProcessor(config);
         updateStatus();

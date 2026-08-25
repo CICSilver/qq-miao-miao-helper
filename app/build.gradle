@@ -10,14 +10,16 @@ android {
         applicationId "com.xianyunb.qqmiaohelper"
         minSdk 23
         targetSdk 34
-        versionCode 3
-        versionName "1.2.1"
+        versionCode 4
+        versionName "1.2.2"
     }
 
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 正式版使用 debug 签名，保证可安装（BuildConfig.DEBUG=false，诊断代码自动隐藏）
+            signingConfig signingConfigs.debug
         }
     }
 
@@ -28,6 +30,7 @@ android {
 
     buildFeatures {
         viewBinding false
+        buildConfig true
     }
 }
 

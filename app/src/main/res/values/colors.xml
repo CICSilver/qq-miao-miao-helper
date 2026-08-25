@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 蓝鲸公益 LJGY 设计语言 -->
+    <color name="ljgy_blue">#3498DB</color>
+    <color name="ljgy_blue_deep">#2980B9</color>
+    <color name="ljgy_text">#1A1A2E</color>
+    <color name="ljgy_text_body">#2D2D44</color>
+    <color name="ljgy_glass">#40FFFFFF</color>
+    <color name="ljgy_glass_border">#4DFFFFFF</color>
+    <color name="ljgy_white">#B3FFFFFF</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+</resources>

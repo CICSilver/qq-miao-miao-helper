@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 签名文件不要提交
+*.keystore
+*.jks
+
+# 输出 APK
+app/build/
+*.apk
+
+# 系统/日志
+*.log
+.DS_Store

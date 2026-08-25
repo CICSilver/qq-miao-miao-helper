@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QQ喵喵助手</string>
+    <string name="accessibility_service_name">QQ喵喵助手</string>
+    <string name="accessibility_service_description">自动将你输入的文本转换为喵喵语气（你→主人、我→本喵、句末加喵、随机颜文字），仅用于QQ聊天输入。</string>
+</resources>

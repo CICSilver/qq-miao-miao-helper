@@ -31,4 +31,8 @@ UI 采用「蓝鲸公益」官网的玻璃拟态 + 蓝色系设计语言。
 ---
 Powered by LJGY · 蓝鲸公益
 
-本项目采用 Apache-2.0 开源许可证
+本项目采用 **Apache License 2.0** 开源协议。
+
+Copyright © 2026 蓝鲸公益 LJGY
+
+详见 [LICENSE](LICENSE) 文件。

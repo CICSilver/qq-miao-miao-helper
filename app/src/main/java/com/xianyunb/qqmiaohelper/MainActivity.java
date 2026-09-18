@@ -57,6 +57,10 @@ public class MainActivity extends AppCompatActivity {
     private EditText edCustom;
     private EditText edRules;
     private SwitchMaterial swMeowBefore;
+    private SwitchMaterial swMaster;
+    private Button btnAccess;
+    /** 正在把配置回填到界面上：此时 setChecked 触发的回调应当忽略 */
+    private boolean bindingUi;
     private EditText edTest;
     private TextView tvStatus;
     private TextView tvPreview;
@@ -131,6 +135,8 @@ public class MainActivity extends AppCompatActivity {
         // 测试
         root.addView(makeCard("测试当前配置", buildTestSection()));
 
+        root.addView(makeCard("如何彻底停用", buildStopSection()));
+
         // 铭牌
         TextView footer = new TextView(this);
         footer.setText("Powered by LJGY · 蓝鲸公益");
@@ -144,6 +150,18 @@ public class MainActivity extends AppCompatActivity {
         return scroll;
     }
 
+    private View buildStopSection() {
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        TextView tv = new TextView(this);
+        tv.setText("暂停：关掉上方的总开关，或下拉通知栏点「喵化开关」。\n\n彻底停止：系统设置 → 无障碍 → 已安装的服务 → QQ喵喵助手 → 关闭。\n\n完全移除：直接卸载本应用。\n\n注意：卸载 QQ 没有任何作用。改写输入框的是本应用的无障碍服务，它不属于 QQ，卸载 QQ 不会把它一起带走。");
+        tv.setTextSize(13);
+        tv.setTextColor(0xFFD8E4EE);
+        tv.setLineSpacing(0f, 1.3f);
+        inner.addView(tv);
+        return inner;
+    }
+
     private View buildStatusCardBody() {
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
@@ -153,12 +171,32 @@ public class MainActivity extends AppCompatActivity {
         tvStatus.setTypeface(null, Typeface.BOLD);
         inner.addView(tvStatus);
 
-        Button btnOpen = roundBtn("前往开启无障碍服务", false);
-        btnOpen.setOnClickListener(v -> openAccessibilitySettings());
+        // 总开关：立即生效，不需要点「保存设置」。
+        // 这是「暂停」的入口 —— 之前只有分项开关，想停下来没有顺手的办法。
+        swMaster = addSwitch(inner, "启用喵化（关闭即暂停）");
+        swMaster.setOnCheckedChangeListener((btn, checked) -> {
+            if (bindingUi) {
+                return;   // 回填界面时不要当成用户操作
+            }
+            config.setMasterEnabled(checked);
+            Toast.makeText(this, checked ? "已启用" : "已暂停", Toast.LENGTH_SHORT).show();
+            updateStatus();
+        });
+
+        TextView hint = new TextView(this);
+        hint.setText("暂停只是让服务不再改写文字，无障碍权限仍然授予着。"
+                + "要彻底停止，见下方「如何彻底停用」。");
+        hint.setTextSize(12);
+        hint.setTextColor(0xFF99AFC5);
+        hint.setPadding(0, dp(6), 0, 0);
+        inner.addView(hint);
+
+        btnAccess = roundBtn("前往无障碍设置", false);
+        btnAccess.setOnClickListener(v -> openAccessibilitySettings());
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
         p.topMargin = dp(14);
-        inner.addView(btnOpen, p);
+        inner.addView(btnAccess, p);
         return inner;
     }
 
@@ -363,6 +401,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadSettings() {
+        bindingUi = true;
         swNi.setChecked(config.isEnableNi());
         swWo.setChecked(config.isEnableWo());
         swMeow.setChecked(config.isEnableMeow());
@@ -371,12 +410,16 @@ public class MainActivity extends AppCompatActivity {
         edCustom.setText(config.getCustomEmoticons());
         edRules.setText(config.getCustomRules());
         swMeowBefore.setChecked(config.isMeowBeforePunct());
+        if (swMaster != null) {
+            swMaster.setChecked(config.isMasterEnabled());
+        }
         // 加载聊天软件开关
         java.util.Set<String> enabledApps = config.getEnabledApps();
         ChatApps[] apps = ChatApps.values();
         for (int i = 0; i < apps.length && i < appSwitches.size(); i++) {
             appSwitches.get(i).setChecked(enabledApps.contains(apps[i].name()));
         }
+        bindingUi = false;
     }
 
     private void saveSettings() {
@@ -436,13 +479,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateStatus() {
-        boolean on = isAccessibilityEnabled();
-        if (on) {
-            tvStatus.setText("● 服务状态：已开启");
-            tvStatus.setTextColor(0xFF2ECC71);
-        } else {
-            tvStatus.setText("○ 服务状态：未开启");
+        boolean granted = isAccessibilityEnabled();
+        boolean running = granted && config.isMasterEnabled();
+
+        if (!granted) {
+            tvStatus.setText("○ 未开启：尚未授予无障碍权限");
             tvStatus.setTextColor(0xFFE74C3C);
+        } else if (!running) {
+            tvStatus.setText("⏸ 已暂停：权限已授予，但不会改写文字");
+            tvStatus.setTextColor(0xFFF39C12);
+        } else {
+            tvStatus.setText("● 运行中：发送前会自动喵化");
+            tvStatus.setTextColor(0xFF2ECC71);
+        }
+
+        if (btnAccess != null) {
+            btnAccess.setText(granted ? "前往系统设置（可在此彻底关闭）" : "前往开启无障碍服务");
+        }
+        if (swMaster != null && swMaster.isChecked() != config.isMasterEnabled()) {
+            bindingUi = true;
+            swMaster.setChecked(config.isMasterEnabled());
+            bindingUi = false;
         }
     }
 

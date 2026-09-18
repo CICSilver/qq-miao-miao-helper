@@ -22,6 +22,8 @@ public class CatConfig {
     public static final String KEY_CUSTOM_EMOTICONS = "custom_emoticons";
     public static final String KEY_ENABLED_APPS = "enabled_apps";
     /** 自定义替换规则，每行 原文=替换 */
+    /** 总开关。关掉后无障碍服务立刻变成空操作，不碰任何输入框。 */
+    public static final String KEY_MASTER_ENABLED = "master_enabled";
     public static final String KEY_CUSTOM_RULES = "custom_rules";
     /** true: 今天真好喵！  false: 今天真好！喵（原版行为） */
     public static final String KEY_MEOW_BEFORE_PUNCT = "meow_before_punct";
@@ -41,6 +43,21 @@ public class CatConfig {
 
     public CatConfig(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * 总开关。
+     *
+     * 这是「暂停」的唯一正确入口：关掉之后服务收到事件就立刻返回，
+     * 不读输入框、不改任何文本。注意它只是暂停 —— 无障碍权限仍然授予着，
+     * 要彻底停止请去系统设置里关闭无障碍服务，或卸载本应用。
+     */
+    public boolean isMasterEnabled() {
+        return prefs.getBoolean(KEY_MASTER_ENABLED, true);
+    }
+
+    public void setMasterEnabled(boolean v) {
+        prefs.edit().putBoolean(KEY_MASTER_ENABLED, v).apply();
     }
 
     public boolean isEnableNi() {

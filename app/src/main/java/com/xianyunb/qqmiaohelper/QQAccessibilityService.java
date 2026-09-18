@@ -80,6 +80,16 @@ public class QQAccessibilityService extends AccessibilityService {
             return;
         }
 
+        // 总开关：关掉就什么都不做。放在最前面，连输入框都不去读。
+        if (!config.isMasterEnabled()) {
+            // 连已经排队的去抖任务也要撤掉，否则关掉开关后
+            // 那个等待中的延迟任务还会再改一次输入框
+            handler.removeCallbacks(debounceRunnable);
+            pendingText = null;
+            idleReset();
+            return;
+        }
+
         // 按来源包名过滤：只处理已勾选的聊天软件
         String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
         if (!enabledPackages.contains(pkg)) {
@@ -128,6 +138,10 @@ public class QQAccessibilityService extends AccessibilityService {
 
     private void processIfApplicable() {
         if (pendingText == null) {
+            return;
+        }
+        // 去抖任务排队期间用户可能刚关掉总开关，这里再确认一次
+        if (config == null || !config.isMasterEnabled()) {
             return;
         }
         String raw = pendingText.toString();

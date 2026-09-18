@@ -2,6 +2,10 @@
 <resources>
     <string name="app_name">QQ喵喵助手</string>
     <string name="accessibility_service_name">QQ喵喵助手</string>
-    <string name="accessibility_service_description">自动将你输入的文本转换为喵喵语气（你→主人、我→本喵、句末加喵、随机颜文字），仅用于QQ聊天输入。</string>
+    <string name="accessibility_service_description">在 QQ 聊天输入框中，把你打的字自动转成喵喵语气（你→主人、我→本喵、句末加喵、随机颜文字）。仅监听 QQ，不读取其它应用。
+
+想暂时停用：打开「QQ喵喵助手」关掉顶部总开关，或下拉通知栏点「喵化开关」。
+想彻底停用：在本页关闭此服务。
+想完全移除：卸载「QQ喵喵助手」（卸载 QQ 无效，本服务属于喵喵助手）。</string>
     <string name="tile_label">喵化开关</string>
 </resources>

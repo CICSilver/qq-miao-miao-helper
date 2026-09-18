@@ -2,6 +2,7 @@ package com.xianyunb.qqmiaohelper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -359,7 +360,10 @@ public final class MeowEngine {
 
         // 3) 颜文字：由内容决定，同一段文字永远选中同一个，打字时不闪烁
         if (cfg.enableKaomoji && cfg.kaomoji != null && !cfg.kaomoji.isEmpty()) {
-            int idx = Math.floorMod(hashSeed("kao|" + m.text), cfg.kaomoji.size());
+            // 注意：不能用 Math.floorMod，它是 API 24+，本项目 minSdk 是 23。
+            // hashSeed 可能返回负数，所以要手动取正模。
+            int n = cfg.kaomoji.size();
+            int idx = ((hashSeed("kao|" + m.text) % n) + n) % n;
             String pick = cfg.kaomoji.get(idx);
             if (pick != null && !pick.isEmpty()) {
                 text = text + (endsWithWhitespace(text) ? "" : " ") + pick;
@@ -400,7 +404,8 @@ public final class MeowEngine {
             }
         }
         // 长的排前面：Trie 本身已是最长优先，这里排序只为让规则列表更直观
-        rules.sort((a, b) -> Integer.compare(b.from.length(), a.from.length()));
+        // 同理：List.sort 是 API 24+，用 Collections.sort（API 1）代替
+        Collections.sort(rules, (a, b) -> Integer.compare(b.from.length(), a.from.length()));
         return rules;
     }
 

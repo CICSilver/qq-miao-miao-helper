@@ -1,0 +1,24 @@
+{
+  "manifest_version": 4,
+  "type": "extension",
+  "name": "QQ喵喵助手",
+  "slug": "qq_miao_nt",
+  "description": "发送消息时自动加喵、替换关键词、附颜文字。输入框里始终是原文。",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "CICSilver",
+      "link": "https://github.com/CICSilver"
+    }
+  ],
+  "platform": ["win32", "darwin", "linux"],
+  "injects": {
+    "main": "./src/main.js",
+    "preload": "./src/preload.js",
+    "renderer": "./src/renderer.js"
+  },
+  "repository": {
+    "repo": "CICSilver/qq-miao-miao-helper",
+    "branch": "fix/engine-rewrite"
+  }
+}

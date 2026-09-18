@@ -21,6 +21,10 @@ public class CatConfig {
     public static final String KEY_PROCESSING_MODE = "processing_mode";
     public static final String KEY_CUSTOM_EMOTICONS = "custom_emoticons";
     public static final String KEY_ENABLED_APPS = "enabled_apps";
+    /** 自定义替换规则，每行 原文=替换 */
+    public static final String KEY_CUSTOM_RULES = "custom_rules";
+    /** true: 今天真好喵！  false: 今天真好！喵（原版行为） */
+    public static final String KEY_MEOW_BEFORE_PUNCT = "meow_before_punct";
 
     // 处理模式
     public static final int MODE_PUNCTUATION = 0; // 标点触发
@@ -61,6 +65,27 @@ public class CatConfig {
 
     public String getCustomEmoticons() {
         return prefs.getString(KEY_CUSTOM_EMOTICONS, "");
+    }
+
+    /** 自定义替换规则原文（每行 原文=替换）。默认留空，只用 你/我 两个开关。 */
+    public String getCustomRules() {
+        return prefs.getString(KEY_CUSTOM_RULES, "");
+    }
+
+    public void setCustomRules(String v) {
+        prefs.edit().putString(KEY_CUSTOM_RULES, v == null ? "" : v).apply();
+    }
+
+    /**
+     * 语气词相对标点的位置。
+     * 默认 true（今天真好喵！）—— 比原版的「今天真好！喵」读起来自然。
+     */
+    public boolean isMeowBeforePunct() {
+        return prefs.getBoolean(KEY_MEOW_BEFORE_PUNCT, true);
+    }
+
+    public void setMeowBeforePunct(boolean v) {
+        prefs.edit().putBoolean(KEY_MEOW_BEFORE_PUNCT, v).apply();
     }
 
     public void setEnableNi(boolean v) {

@@ -13,10 +13,14 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 无障碍服务：监听已勾选聊天软件的输入框。
- * 按处理模式对用户输入的文本做喵喵语气转换并回写输入框。
- * - 标点触发：仅在文本新增标点时处理，打字阶段不处理
- * - 实时处理：停顿(去抖)后自动转换一次，不打断输入法组词推荐
+ * 无障碍服务：监听已勾选聊天软件的输入框，把用户输入转成喵喵语气并回写。
+ *
+ * - 标点触发：仅在文本新增标点时处理，打字阶段不动
+ * - 实时处理：停顿(去抖)后转换一次
+ *
+ * 注意这是「编辑时改写」——发送那一刻无法介入。无障碍框架收到 TYPE_VIEW_CLICKED
+ * 时点击已经派发完毕，onKeyEvent() 又只收硬件按键，软键盘的发送键不走它。
+ * 所以这里保证的是「框里的内容随时都已经是喵化的」，发送时机就无关紧要了。
  */
 public class QQAccessibilityService extends AccessibilityService {
 
@@ -31,12 +35,14 @@ public class QQAccessibilityService extends AccessibilityService {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable debounceRunnable = this::processIfApplicable;
 
+    /** 增量重写状态机：防回声、防自指规则套娃、避开拼音组词。 */
+    private final MeowRewriter rewriter = new MeowRewriter();
+
     // 最近一个待处理的文本（去抖期间捕获的最新状态）
     private CharSequence pendingText;
     private String pendingPkg;
 
-    // 状态：上一次处理写入的文本与标点计数
-    private String lastProcessedText;
+    /** 标点触发模式下，上次处理时的标点数量 */
     private int lastProcessedPunctCount;
 
     // 预取软件包名集合，减少重复读取配置
@@ -86,21 +92,17 @@ public class QQAccessibilityService extends AccessibilityService {
             return;
         }
 
-        // 窗口状态/内容变化：用于初次定位输入框或更新状态
+        // 窗口状态/内容变化：输入框被清空或切换时重置状态
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                 || event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                 || event.getEventType() == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
-            // 记录当前文本为空时清空状态
             AccessibilityNodeInfo input = findFocusedInputNode();
             if (input == null) {
                 return;
             }
             CharSequence t = input.getText();
             if (t == null || t.length() == 0) {
-                if (lastProcessedText != null) {
-                    lastProcessedText = null;
-                    lastProcessedPunctCount = 0;
-                }
+                idleReset();
             }
         }
     }
@@ -120,12 +122,7 @@ public class QQAccessibilityService extends AccessibilityService {
 
     private void capturePending(String pkg) {
         AccessibilityNodeInfo input = findFocusedInputNode();
-        if (input == null) {
-            pendingText = null;
-            pendingPkg = pkg;
-            return;
-        }
-        pendingText = input.getText();
+        pendingText = input == null ? null : input.getText();
         pendingPkg = pkg;
     }
 
@@ -138,16 +135,12 @@ public class QQAccessibilityService extends AccessibilityService {
             idleReset();
             return;
         }
-        // 防回声：读到的正是上次写入的内容，跳过
-        if (raw.equals(lastProcessedText)) {
-            return;
-        }
-        // 处理时重新定位输入框（避免缓存节点失效），用包名辅助过滤
+        // 处理时重新定位输入框（避免缓存节点失效）
         AccessibilityNodeInfo input = findFocusedInputNode();
         if (input == null) {
             return;
         }
-        transformAndWrite(input, raw, pendingPkg);
+        transformAndWrite(input, raw, pendingPkg, false);
     }
 
     private void processImmediateIfPunctuation(String pkg) {
@@ -161,7 +154,7 @@ public class QQAccessibilityService extends AccessibilityService {
             return;
         }
         String raw = t.toString();
-        if (raw.equals(lastProcessedText)) {
+        if (rewriter.isEcho(raw)) {
             return;
         }
         int punctCount = countPunctuation(raw);
@@ -169,20 +162,22 @@ public class QQAccessibilityService extends AccessibilityService {
             return;
         }
         lastProcessedPunctCount = punctCount;
-        transformAndWrite(input, raw, pkg);
+        // 标点刚上屏说明组词已结束，可以跳过 composing 启发式
+        transformAndWrite(input, raw, pkg, true);
     }
 
-    private void transformAndWrite(AccessibilityNodeInfo input, String raw, String pkg) {
-        String processed = processor.process(raw);
-        if (processed != null && !processed.equals(raw)) {
-            Log.d(TAG, "处理[" + pkg + "]: '" + raw + "' -> '" + processed + "'");
-            lastProcessedText = processed;
-            setNodeText(input, processed);
+    private void transformAndWrite(AccessibilityNodeInfo input, String raw, String pkg,
+                                   boolean skipComposingCheck) {
+        String processed = rewriter.rewrite(raw, processor.buildConfig(), skipComposingCheck);
+        if (processed == null) {
+            return;   // 回声 / 组词中 / 无需改动
         }
+        Log.d(TAG, "处理[" + pkg + "]: '" + raw + "' -> '" + processed + "'");
+        setNodeText(input, processed);
     }
 
     private void idleReset() {
-        lastProcessedText = null;
+        rewriter.reset();
         lastProcessedPunctCount = 0;
     }
 
@@ -240,21 +235,34 @@ public class QQAccessibilityService extends AccessibilityService {
         int c = 0;
         for (int i = 0; i < s.length(); i++) {
             char ch = s.charAt(i);
-            if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?' || ch == '，' || ch == ',' || ch == '；' || ch == ';') {
+            if (ch == '。' || ch == '！' || ch == '？' || ch == '!' || ch == '?'
+                    || ch == '，' || ch == ',' || ch == '；' || ch == ';') {
                 c++;
             }
         }
         return c;
     }
 
+    /**
+     * 写回文本，并把光标放到末尾。
+     *
+     * 原版把 SELECTION_START/END 塞进 ACTION_SET_TEXT 的参数里 —— 那两个参数属于
+     * ACTION_SET_SELECTION，在这里会被忽略，结果是光标位置全凭系统默认。
+     * 这里改成写完之后单独发一次 ACTION_SET_SELECTION。
+     */
     private void setNodeText(AccessibilityNodeInfo node, String text) {
         try {
             Bundle args = new Bundle();
             args.putCharSequence(
                     AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
-            args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0);
-            args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length());
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+            if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                Log.w(TAG, "ACTION_SET_TEXT 被拒绝");
+                return;
+            }
+            Bundle sel = new Bundle();
+            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, text.length());
+            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, text.length());
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel);
         } catch (Exception e) {
             Log.e(TAG, "设置文本失败", e);
         }

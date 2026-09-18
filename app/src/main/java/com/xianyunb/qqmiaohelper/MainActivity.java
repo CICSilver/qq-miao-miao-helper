@@ -48,7 +48,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_GLASS = 0x40FFFFFF;
 
     private CatConfig config;
-    private TextProcessor processor;
 
     private SwitchMaterial swNi;
     private SwitchMaterial swWo;
@@ -56,6 +55,8 @@ public class MainActivity extends AppCompatActivity {
     private SwitchMaterial swEmoticon;
     private Spinner spinnerMode;
     private EditText edCustom;
+    private EditText edRules;
+    private SwitchMaterial swMeowBefore;
     private EditText edTest;
     private TextView tvStatus;
     private TextView tvPreview;
@@ -67,7 +68,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setupWindow();
         config = new CatConfig(this);
-        processor = new TextProcessor(config);
         setContentView(buildUi());
         loadSettings();
         updateStatus();
@@ -125,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
         root.addView(makeCard("处理模式", buildModeSection()));
 
         // 自定义颜文字
+        root.addView(makeCard("自定义替换规则", buildRulesSection()));
         root.addView(makeCard("自定义颜文字", buildCustomSection()));
 
         // 测试
@@ -185,6 +186,7 @@ public class MainActivity extends AppCompatActivity {
         swWo = addSwitch(inner, "将「我」替换为「本喵」");
         swMeow = addSwitch(inner, "断句加喵");
         swEmoticon = addSwitch(inner, "消息末尾随机颜文字");
+        swMeowBefore = addSwitch(inner, "喵放在标点之前（真好喵！/ 真好！喵）");
         return inner;
     }
 
@@ -205,6 +207,22 @@ public class MainActivity extends AppCompatActivity {
         hint.setTextColor(0xFF99AFC5);
         hint.setPadding(0, dp(8), 0, 0);
         inner.addView(hint);
+        return inner;
+    }
+
+    private View buildRulesSection() {
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        edRules = new EditText(this);
+        setTransparentInput(edRules, "每行一条，格式：原文=替换\n例如  我们=我们这群喵\n留空则只用上面的两个开关");
+        inner.addView(edRules);
+
+        TextView tip = new TextView(this);
+        tip.setText("规则按最长优先匹配，且只扫描一趟 —— 「我们=我们这群喵」不会把自己的结果再替换一遍。");
+        tip.setTextSize(12);
+        tip.setTextColor(0xFF99AFC5);
+        tip.setPadding(0, dp(8), 0, 0);
+        inner.addView(tip);
         return inner;
     }
 
@@ -351,6 +369,8 @@ public class MainActivity extends AppCompatActivity {
         swEmoticon.setChecked(config.isEnableEmoticon());
         spinnerMode.setSelection(config.getProcessingMode());
         edCustom.setText(config.getCustomEmoticons());
+        edRules.setText(config.getCustomRules());
+        swMeowBefore.setChecked(config.isMeowBeforePunct());
         // 加载聊天软件开关
         java.util.Set<String> enabledApps = config.getEnabledApps();
         ChatApps[] apps = ChatApps.values();
@@ -367,6 +387,8 @@ public class MainActivity extends AppCompatActivity {
         config.setProcessingMode(spinnerMode.getSelectedItemPosition() == 1
                 ? CatConfig.MODE_REALTIME : CatConfig.MODE_PUNCTUATION);
         config.setCustomEmoticons(edCustom.getText().toString());
+        config.setCustomRules(edRules.getText().toString());
+        config.setMeowBeforePunct(swMeowBefore.isChecked());
         // 保存聊天软件开关
         java.util.Set<String> enabledApps = new java.util.HashSet<>();
         ChatApps[] apps = ChatApps.values();
@@ -377,8 +399,28 @@ public class MainActivity extends AppCompatActivity {
         }
         config.setEnabledApps(enabledApps);
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
-        processor = new TextProcessor(config);
         updateStatus();
+    }
+
+    /** 按界面当前（可能尚未保存的）状态组装引擎参数。 */
+    private MeowEngine.Config configFromUi() {
+        MeowEngine.Config cfg = new MeowEngine.Config();
+        java.util.List<MeowEngine.Rule> rules = new java.util.ArrayList<>();
+        if (swNi.isChecked()) {
+            rules.add(new MeowEngine.Rule("你", "主人"));
+        }
+        if (swWo.isChecked()) {
+            rules.add(new MeowEngine.Rule("我", "本喵"));
+        }
+        rules.addAll(MeowEngine.parseRules(edRules.getText().toString()));
+        cfg.rules = rules;
+        cfg.enableSuffix = swMeow.isChecked();
+        cfg.suffixBeforePunct = swMeowBefore.isChecked();
+        cfg.enableKaomoji = swEmoticon.isChecked();
+        cfg.kaomoji = MeowEngine.parseKaomoji(
+                edCustom.getText().toString(),
+                CatConfig.BUILTIN_EMOTICONS.toArray(new String[0]));
+        return cfg;
     }
 
     private void runTest() {
@@ -387,7 +429,9 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请先输入要测试的文字", Toast.LENGTH_SHORT).show();
             return;
         }
-        String result = processor.process(raw);
+        // 用界面上的当前状态预览，而不是已保存的配置 ——
+        // 否则「先测试、满意再保存」这个流程根本走不通。
+        String result = MeowEngine.transform(raw, configFromUi());
         tvPreview.setText("原始：\n" + raw + "\n\n处理后：\n" + result);
     }
 

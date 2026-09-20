@@ -37,8 +37,10 @@ public class QQAccessibilityService extends AccessibilityService {
     private final MeowCommitter committer = new MeowCommitter();
 
     // 颜文字库与关键词表解析后缓存，原文变了才重新解析
-    private String cachedLibRaw;
-    private String cachedKwRaw;
+    /** 上次重建缓存时的配置版本号，见 CatConfig#getVersion */
+    private int cachedVersion = -1;
+    /** 引擎参数也跟着缓存 —— 原来每次按键都重新读 6 项 prefs 并重解析自定义规则 */
+    private MeowEngine.Config cachedCfg;
     private KaomojiLib.Pack pack;
     /** 上一次处理的软件包名，用来在切换软件时清掉封句状态 */
     private String lastPkg = "";
@@ -71,19 +73,38 @@ public class QQAccessibilityService extends AccessibilityService {
         return enabled;
     }
 
-    /** 解析颜文字库与关键词表；原文没变就直接用缓存 */
-    private void ensureKaomojiLoaded() {
-        String libRaw = config.getKaomojiLib();
-        String kwRaw = config.getKaomojiKeywords();
-        if (pack == null || !libRaw.equals(cachedLibRaw) || !kwRaw.equals(cachedKwRaw)) {
-            cachedLibRaw = libRaw;
-            cachedKwRaw = kwRaw;
-            pack = KaomojiLib.Pack.of(libRaw, kwRaw);
+    /**
+     * 按需重建词库与引擎参数。
+     *
+     * 这是按键热路径，每敲一个字都会走到，所以判断依据必须便宜：比一个 int。
+     * 原来是把整份颜文字库读出来和缓存做字符串比较 —— 词库涨到 24 KB 之后
+     * 每次按键都要读两个 raw 资源再比 24K 个字符，事件回调因此变慢，
+     * 慢到一定程度系统就会把无障碍服务停用。
+     */
+    private void ensureLoaded() {
+        int v = config.getVersion();
+        if (pack != null && v == cachedVersion) {
+            return;
         }
+        cachedVersion = v;
+        pack = KaomojiLib.Pack.of(config.getKaomojiLib(), config.getKaomojiKeywords());
+        cachedCfg = processor.buildConfig();
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        // onAccessibilityEvent 里抛出的异常会直接搞死整个服务，系统随后
+        // 把它停用 —— 用户看到的就是「用着用着无障碍自己关了，还打不开」。
+        // 一次改写失败远不如整个服务活着重要。
+        try {
+            handleEvent(event);
+        } catch (Throwable t) {
+            Log.e(TAG, "处理事件时出错，已忽略", t);
+            committer.reset();
+        }
+    }
+
+    private void handleEvent(AccessibilityEvent event) {
         if (processor == null || config == null) {
             return;
         }
@@ -108,27 +129,29 @@ public class QQAccessibilityService extends AccessibilityService {
         }
 
         if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-            onTextChanged(pkg);
+            onTextChanged(pkg, event.getSource());
             return;
         }
 
-        // 输入框被清空或切换 → 重置封句状态
+        // 换窗口或换焦点 → 之前那个输入框的冻结前缀作废。
+        //
+        // 这里【不】去读输入框内容。原来会 findFocusedInputNode() 再看它是不是空的，
+        // 那是一次整棵窗口树的深度优先遍历；而无条件 reset 的代价只是下一句重新
+        // 开始封句，本来也就是想要的效果。
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-                || event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
                 || event.getEventType() == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
-            AccessibilityNodeInfo input = findFocusedInputNode();
-            if (input == null) {
-                return;
-            }
-            CharSequence t = input.getText();
-            if (t == null || t.length() == 0) {
-                committer.reset();
-            }
+            committer.reset();
         }
     }
 
-    private void onTextChanged(String pkg) {
-        AccessibilityNodeInfo input = findFocusedInputNode();
+    /**
+     * @param source 事件自带的、内容发生变化的那个节点。
+     *               直接用它就省掉了一次整棵窗口树的遍历 —— 这是按键热路径上
+     *               最贵的一步。只有拿不到或者它不可编辑时才退回去搜。
+     */
+    private void onTextChanged(String pkg, AccessibilityNodeInfo source) {
+        AccessibilityNodeInfo input =
+                (source != null && source.isEditable()) ? source : findFocusedInputNode();
         if (input == null) {
             return;
         }
@@ -142,8 +165,8 @@ public class QQAccessibilityService extends AccessibilityService {
             return;     // 自己写回去引发的回声
         }
 
-        ensureKaomojiLoaded();
-        String out = committer.onTextChanged(raw, processor.buildConfig(), pack);
+        ensureLoaded();
+        String out = committer.onTextChanged(raw, cachedCfg, pack);
         if (out == null) {
             return;     // 没有封句，输入框保持不动
         }

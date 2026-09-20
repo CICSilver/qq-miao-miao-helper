@@ -1,8 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  无障碍服务声明。
+
+  1) 没有 packageNames。vivo 会拦截「声明监听 QQ 包名」的无障碍服务
+     （A/B 验证过：去掉就能开）。过滤改在代码里按 enabledPackages 做，
+     服务收全部应用的事件然后立即丢弃。
+
+  2) 事件类型只留三种，这直接决定服务的开销：
+       typeViewTextChanged                        真正要干活的（用户在打字）
+       typeWindowStateChanged / typeViewFocused   切窗口、切焦点时清封句状态
+     原来还订阅了 typeWindowContentChanged 和 typeViewScrolled —— 前者在
+     聊天界面里持续不断地触发（每条新消息、每次列表变动），而每次处理都要
+     对整棵窗口树做深度优先遍历，找不到聚焦输入框时还会再遍历一遍。
+     订阅了却几乎用不上，纯属白烧；事件回调过慢会被系统判定无响应并停用服务。
+
+  3) flagReportViewIds 和 flagRetrieveInteractiveWindows 都去掉了：
+     前者供 getViewIdResourceName()、后者供 getWindows()，这两个方法
+     本项目一次都没调用，留着只是让系统多做事。
+-->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled|typeViewTextChanged"
+    android:accessibilityEventTypes="typeViewTextChanged|typeWindowStateChanged|typeViewFocused"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="50" />

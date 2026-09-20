@@ -44,10 +44,35 @@ public class CatConfig {
     private final SharedPreferences prefs;
     private final Context appContext;
 
+    /**
+     * 配置版本号，任何一项改动都 +1。
+     *
+     * 无障碍服务每次按键都要确认配置有没有变。原来的办法是把整份颜文字库
+     * 读出来和缓存做字符串比较 —— 词库涨到 24 KB 之后，每次按键都要读两个
+     * raw 资源、解码、再比 24K 个字符，纯属白烧。事件回调太慢会被系统判定
+     * 无响应并停用服务。现在比一个 int 就够了。
+     */
+    private volatile int version = 1;
+
+    /** 必须持有强引用：SharedPreferences 只保存监听器的弱引用 */
+    private final SharedPreferences.OnSharedPreferenceChangeListener prefListener =
+            new SharedPreferences.OnSharedPreferenceChangeListener() {
+                @Override
+                public void onSharedPreferenceChanged(SharedPreferences sp, String key) {
+                    version++;
+                }
+            };
+
     public CatConfig(Context context) {
         appContext = context.getApplicationContext();
         prefs = appContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        prefs.registerOnSharedPreferenceChangeListener(prefListener);
         adoptNewApps();
+    }
+
+    /** 配置快照编号；变了才需要重新解析，见 {@link #version} */
+    public int getVersion() {
+        return version;
     }
 
     /**
@@ -82,8 +107,24 @@ public class CatConfig {
         }
     }
 
+    /**
+     * res/raw 的内容缓存。这些是编译进包里的常量，一个进程里读一次就够了 ——
+     * 原来每次按键都重读一遍 24 KB，是服务被系统判定无响应的主要原因。
+     */
+    private final java.util.Map<Integer, String> rawCache = new java.util.HashMap<>();
+
     /** 读 res/raw 里的纯文本默认值。读不到时返回空串，调用方自行兜底。 */
-    private String readRaw(int resId) {
+    private synchronized String readRaw(int resId) {
+        String hit = rawCache.get(resId);
+        if (hit != null) {
+            return hit;
+        }
+        String v = readRawUncached(resId);
+        rawCache.put(resId, v);
+        return v;
+    }
+
+    private String readRawUncached(int resId) {
         InputStream in = null;
         try {
             in = appContext.getResources().openRawResource(resId);

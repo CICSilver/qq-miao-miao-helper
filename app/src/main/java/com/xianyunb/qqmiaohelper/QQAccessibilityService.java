@@ -39,8 +39,7 @@ public class QQAccessibilityService extends AccessibilityService {
     // 颜文字库与关键词表解析后缓存，原文变了才重新解析
     private String cachedLibRaw;
     private String cachedKwRaw;
-    private List<KaomojiLib.Entry> lib;
-    private List<KaomojiLib.KeywordRule> keywords;
+    private KaomojiLib.Pack pack;
 
     private Set<String> enabledPackages = new HashSet<>();
 
@@ -73,17 +72,11 @@ public class QQAccessibilityService extends AccessibilityService {
     /** 解析颜文字库与关键词表；原文没变就直接用缓存 */
     private void ensureKaomojiLoaded() {
         String libRaw = config.getKaomojiLib();
-        if (lib == null || !libRaw.equals(cachedLibRaw)) {
-            cachedLibRaw = libRaw;
-            lib = KaomojiLib.parseLib(libRaw);
-            if (lib.isEmpty()) {
-                lib = KaomojiLib.fallbackLib();
-            }
-        }
         String kwRaw = config.getKaomojiKeywords();
-        if (keywords == null || !kwRaw.equals(cachedKwRaw)) {
+        if (pack == null || !libRaw.equals(cachedLibRaw) || !kwRaw.equals(cachedKwRaw)) {
+            cachedLibRaw = libRaw;
             cachedKwRaw = kwRaw;
-            keywords = KaomojiLib.parseKeywords(kwRaw);
+            pack = KaomojiLib.Pack.of(libRaw, kwRaw);
         }
     }
 
@@ -140,7 +133,7 @@ public class QQAccessibilityService extends AccessibilityService {
         }
 
         ensureKaomojiLoaded();
-        String out = committer.onTextChanged(raw, processor.buildConfig(), lib, keywords);
+        String out = committer.onTextChanged(raw, processor.buildConfig(), pack);
         if (out == null) {
             return;     // 没有封句，输入框保持不动
         }

@@ -11,6 +11,7 @@ import java.util.List;
  * 数据来自两份纯文本（内置在 res/raw，用户可在界面里覆盖）：
  *
  *   颜文字库    标签1,标签2 = 颜文字
+ *               @merge 关键词情绪 + 标点情绪 = 结果情绪    ← 情绪合成表，同一份文件里
  *   关键词表    关键词 = 情绪标签      （右边留空 = 排除短语）
  *
  * 标签写在左边是必须的 —— 颜文字本身含 '='（猫脸的眼睛就是 =），
@@ -20,7 +21,7 @@ import java.util.List;
  *   1. 扫原文找情绪标签（左到右最长优先，取最后一个命中）
  *   2. 句尾标点也对应一个标签
  *   3. 候选 = 关键词标签 ∩ 标点标签
- *      交集为空 → 只用关键词标签 → 只用标点标签 → 全库
+ *      交集为空 → 查情绪合成表 → 只用关键词标签 → 只用标点标签 → 全库
  *   4. 从候选里排除上次用过的那个，再按内容哈希定选
  */
 public final class KaomojiLib {
@@ -60,10 +61,67 @@ public final class KaomojiLib {
         }
     }
 
-    /** 句尾标点 → 情绪标签。组合标点（？！ / ！？）归入「惊讶」。 */
+    /**
+     * 一条情绪合成规则：关键词情绪 + 标点情绪 = 结果情绪。
+     *
+     * 存在的理由是「什么意思！」这种句子 —— 关键词说它困惑、标点说它兴奋，
+     * 两个池子毫无交集，可单独保哪一边都不对（困惑组自带问号，兴奋组太欢快）。
+     * 它真正的语气是难以置信，也就是惊讶。这种语义叠加没法从标签本身推出来，
+     * 只能列表。
+     */
+    public static final class Merge {
+        public final String kwTag;
+        public final String punctTag;
+        public final String result;
+
+        Merge(String kwTag, String punctTag, String result) {
+            this.kwTag = kwTag;
+            this.punctTag = punctTag;
+            this.result = result;
+        }
+    }
+
+    /**
+     * 选颜文字所需的全部数据，打包传递。
+     *
+     * 单独拎出来是因为这些东西总是同生同死：解析同一批原文、一起缓存、
+     * 一起传给 MeowCommitter。以后再加词表也只动这里，不用改一路上的签名。
+     */
+    public static final class Pack {
+        public final List<Entry> lib;
+        public final List<Merge> merges;
+        public final List<KeywordRule> keywords;
+
+        public Pack(List<Entry> lib, List<Merge> merges, List<KeywordRule> keywords) {
+            this.lib = lib;
+            this.merges = merges;
+            this.keywords = keywords;
+        }
+
+        /** 从两份原文解析；颜文字库为空时退回内置兜底，保证任何时候都有东西可选 */
+        public static Pack of(String libRaw, String kwRaw) {
+            List<Entry> lib = parseLib(libRaw);
+            if (lib.isEmpty()) {
+                lib = fallbackLib();
+            }
+            return new Pack(lib, parseMerges(libRaw), parseKeywords(kwRaw));
+        }
+    }
+
+    /** 省略号：连续两个以上的中文句号会被折算成它 */
+    public static final String ELLIPSIS = "...";
+
+    /**
+     * 句尾标点 → 情绪标签。
+     * 组合标点（？！ / ！？）归入「惊讶」，省略号归入「无奈」。
+     */
     public static String punctTag(String punct) {
-        if (punct == null) {
+        if (punct == null || punct.isEmpty()) {
             return "平静";
+        }
+        // 省略号单独一档 —— 它里面既没有 ？也没有 ！，落到下面会被当成平静
+        if (punct.indexOf('.') >= 0) {
+            return "无奈";
         }
         boolean q = punct.indexOf('？') >= 0 || punct.indexOf('?') >= 0;
         boolean e = punct.indexOf('！') >= 0 || punct.indexOf('!') >= 0;
@@ -95,6 +153,8 @@ public final class KaomojiLib {
         return out;
     }
 
+    private static final String MERGE_PREFIX = "@merge";
+
     public static List<Entry> parseLib(String raw) {
         List<Entry> out = new ArrayList<>();
         if (raw == null) {
@@ -102,7 +162,8 @@ public final class KaomojiLib {
         }
         for (String line : raw.split("\n")) {
             String t = line.trim();
-            if (t.isEmpty() || t.startsWith("#")) {
+            // @ 开头的是指令行（目前只有 @merge），它也含 '='，不跳过会被当成颜文字
+            if (t.isEmpty() || t.startsWith("#") || t.startsWith("@")) {
                 continue;
             }
             int eq = t.indexOf('=');
@@ -113,6 +174,37 @@ public final class KaomojiLib {
             String kao = t.substring(eq + 1).trim();
             if (!kao.isEmpty() && !tags.isEmpty()) {
                 out.add(new Entry(kao, tags));
+            }
+        }
+        return out;
+    }
+
+    /** 从同一份颜文字库原文里挑出 {@code @merge 甲 + 乙 = 丙} 这类行 */
+    public static List<Merge> parseMerges(String raw) {
+        List<Merge> out = new ArrayList<>();
+        if (raw == null) {
+            return out;
+        }
+        for (String line : raw.split("\n")) {
+            String t = line.trim();
+            if (!t.startsWith(MERGE_PREFIX)) {
+                continue;
+            }
+            String rest = t.substring(MERGE_PREFIX.length());
+            int eq = rest.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String left = rest.substring(0, eq);
+            String result = rest.substring(eq + 1).trim();
+            int plus = left.indexOf('+');
+            if (plus <= 0 || result.isEmpty()) {
+                continue;
+            }
+            String kwTag = left.substring(0, plus).trim();
+            String pTag = left.substring(plus + 1).trim();
+            if (!kwTag.isEmpty() && !pTag.isEmpty()) {
+                out.add(new Merge(kwTag, pTag, result));
             }
         }
         return out;
@@ -183,6 +275,29 @@ public final class KaomojiLib {
 
     // ---------------------------------------------------------------- 选择
 
+    /** 情绪合成表命中时的候选；没有可用规则时返回空表 */
+    private static List<Entry> byMerge(List<Entry> lib, List<Merge> merges,
+                                       List<String> kwTags, String pTag) {
+        List<Entry> out = new ArrayList<>();
+        if (merges == null) {
+            return out;
+        }
+        for (Merge m : merges) {
+            if (!m.punctTag.equals(pTag) || !kwTags.contains(m.kwTag)) {
+                continue;
+            }
+            for (Entry e : lib) {
+                if (e.tags.contains(m.result)) {
+                    out.add(e);
+                }
+            }
+            if (!out.isEmpty()) {
+                return out;     // 先写的规则先赢
+            }
+        }
+        return out;
+    }
+
     /**
      * 挑一个颜文字。
      *
@@ -191,12 +306,12 @@ public final class KaomojiLib {
      * @param avoid  上次用过的颜文字，尽量避开，减少机械感；可为 null
      * @return 选中的颜文字；库为空时返回 ""
      */
-    public static String select(String body, String punct, List<Entry> lib,
-                                List<KeywordRule> rules, String avoid) {
-        if (lib == null || lib.isEmpty()) {
+    public static String select(String body, String punct, Pack pack, String avoid) {
+        if (pack == null || pack.lib.isEmpty()) {
             return "";
         }
-        KeywordRule kw = scanLastKeyword(body, rules);
+        List<Entry> lib = pack.lib;
+        KeywordRule kw = scanLastKeyword(body, pack.keywords);
         String pTag = punctTag(punct);
 
         List<Entry> byKw = new ArrayList<>();
@@ -214,12 +329,17 @@ public final class KaomojiLib {
             }
         }
 
-        // 四级降级，保证一定有结果
+        // 五级降级，保证一定有结果
         List<Entry> pool = new ArrayList<>();
         for (Entry e : byKw) {
             if (byPunct.contains(e)) {
                 pool.add(e);
             }
+        }
+        if (pool.isEmpty() && kw != null) {
+            // 交集为空时先问合成表：两种情绪叠起来往往是第三种情绪，
+            // 直接保关键词或保标点都会丢掉这层意思（「什么意思！」= 难以置信）
+            pool = byMerge(lib, pack.merges, kw.tags, pTag);
         }
         if (pool.isEmpty()) {
             pool = byKw;            // 关键词比标点具体，交集空时保关键词

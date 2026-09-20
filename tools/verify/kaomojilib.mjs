@@ -7,12 +7,15 @@ import { hashSeed } from './transcribe.mjs';
 
 const splitTags = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
+export const ELLIPSIS = '...';
+
 export function parseLib(raw) {
   const out = [];
   if (!raw) return out;
   for (const line of String(raw).split('\n')) {
     const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
+    // @ 开头是指令行（目前只有 @merge），它也含 '='，不跳过会被当成颜文字
+    if (!t || t.startsWith('#') || t.startsWith('@')) continue;
     const eq = t.indexOf('=');
     if (eq <= 0) continue;
     // 标签在左、颜文字在右 —— 颜文字含 '='（猫脸的眼睛），
@@ -22,6 +25,43 @@ export function parseLib(raw) {
     if (kao && tags.length) out.push({ kao, tags });
   }
   return out;
+}
+
+/** 从同一份颜文字库原文里挑出 `@merge 甲 + 乙 = 丙` 这类行 */
+export function parseMerges(raw) {
+  const out = [];
+  if (!raw) return out;
+  for (const line of String(raw).split('\n')) {
+    const t = line.trim();
+    if (!t.startsWith('@merge')) continue;
+    const rest = t.slice('@merge'.length);
+    const eq = rest.indexOf('=');
+    if (eq <= 0) continue;
+    const left = rest.slice(0, eq);
+    const result = rest.slice(eq + 1).trim();
+    const plus = left.indexOf('+');
+    if (plus <= 0 || !result) continue;
+    const kwTag = left.slice(0, plus).trim();
+    const punctTag = left.slice(plus + 1).trim();
+    if (kwTag && punctTag) out.push({ kwTag, punctTag, result });
+  }
+  return out;
+}
+
+/** 选颜文字要用的全部数据，打包传递；库为空时退回兜底 */
+export function pack(libRaw, kwRaw) {
+  let lib = parseLib(libRaw);
+  if (!lib.length) lib = fallbackLib();
+  return { lib, merges: parseMerges(libRaw), keywords: parseKeywords(kwRaw) };
+}
+
+export function fallbackLib() {
+  return [
+    { kao: '(=^･ω･^=)', tags: ['平静', '日常'] },
+    { kao: 'ヽ(=^･ω･^=)丿', tags: ['兴奋', '开心'] },
+    { kao: '(=ʘωʘ=)', tags: ['疑问'] },
+    { kao: '(=ﾟдﾟ=)', tags: ['惊讶'] },
+  ];
 }
 
 export function parseKeywords(raw) {
@@ -42,9 +82,11 @@ export function parseKeywords(raw) {
 
 export const isExclusion = (r) => r.tags.length === 0;
 
-/** 句尾标点 → 情绪标签 */
+/** 句尾标点 → 情绪标签。组合标点归「惊讶」，省略号归「无奈」 */
 export function punctTag(punct) {
   if (!punct) return '平静';
+  // 省略号单独一档 —— 它里面既没有 ？也没有 ！，落到下面会被当成平静
+  if (punct.includes('.')) return '无奈';
   const q = punct.includes('？') || punct.includes('?');
   const e = punct.includes('！') || punct.includes('!');
   if (q && e) return '惊讶';
@@ -74,15 +116,28 @@ export function scanLastKeyword(body, rules) {
 
 const hasAny = (entry, want) => want.some((t) => entry.tags.includes(t));
 
-export function select(body, punct, lib, rules, avoid) {
-  if (!lib || !lib.length) return '';
-  const kw = scanLastKeyword(body, rules);
+/** 情绪合成表命中时的候选；没有可用规则时返回空表 */
+function byMerge(lib, merges, kwTags, pTag) {
+  for (const m of merges || []) {
+    if (m.punctTag !== pTag || !kwTags.includes(m.kwTag)) continue;
+    const hit = lib.filter((e) => e.tags.includes(m.result));
+    if (hit.length) return hit;    // 先写的规则先赢
+  }
+  return [];
+}
+
+export function select(body, punct, pk, avoid) {
+  if (!pk || !pk.lib.length) return '';
+  const lib = pk.lib;
+  const kw = scanLastKeyword(body, pk.keywords);
   const pTag = punctTag(punct);
 
   const byKw = kw ? lib.filter((e) => hasAny(e, kw.tags)) : [];
   const byPunct = lib.filter((e) => e.tags.includes(pTag));
 
   let pool = byKw.filter((e) => byPunct.includes(e));   // 交集
+  // 交集为空时先问合成表：两种情绪叠起来往往是第三种（「什么意思！」= 难以置信）
+  if (!pool.length && kw) pool = byMerge(lib, pk.merges, kw.tags, pTag);
   if (!pool.length) pool = byKw;                        // 关键词比标点具体
   if (!pool.length) pool = byPunct;
   if (!pool.length) pool = lib;

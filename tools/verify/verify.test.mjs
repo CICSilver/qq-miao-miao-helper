@@ -20,20 +20,26 @@ const CFG = {
   rules: RULES, enableKaomoji: false, protectRegions: true,
 };
 
-const LIB = K.parseLib(`
+const LIB_RAW = `
 平静,日常 = (=^･ω･^=)
 平静,日常 = (=^･^=)
 兴奋,开心 = ヽ(=^･ω･^=)丿
 疑问 = (=ʘωʘ=)
-疑问 = (=･ｪ･=)?
+疑问,困惑 = (=･ｪ･=)?
 惊讶 = (=ﾟдﾟ=)
 感激 = (=^･ω･^=)♡
 兴奋,感激 = ヾ(=^･ω･^=)ノ
 安慰 = (づ=^･ω･^=)づ
 难过,委屈 = (=；ω；=)
-`);
+无奈 = (=ー ー=)
+无奈,困倦 = (=_ _=)
+无奈,困倦 = (=＿ω＿=)
 
-const KWS = K.parseKeywords(`
+@merge 困惑 + 兴奋 = 惊讶
+@merge 困惑 + 惊讶 = 惊讶
+`;
+
+const KW_RAW = `
 谢谢 = 感激
 别难过 = 安慰
 不开心 = 难过
@@ -41,17 +47,24 @@ const KWS = K.parseKeywords(`
 开心 = 开心
 不喜欢 =
 喜欢 = 喜欢
-`);
+什么意思 = 困惑
+好累 = 困倦
+真的假的 = 困惑
+`;
+
+const PACK = K.pack(LIB_RAW, KW_RAW);
+const LIB = PACK.lib;
+const KWS = PACK.keywords;
 
 /** 模拟输入框：按步骤喂给 committer，返回最终内容与写回次数 */
-function play(steps, cfg = CFG, lib = LIB, kws = KWS) {
+function play(steps, cfg = CFG, pack = PACK) {
   const c = new MeowCommitter();
   let box = '';
   let writes = 0;
   for (const s of steps) {
     if (typeof s === 'string') box += s;
     else if (s.back) box = box.slice(0, -s.back);
-    const out = c.onTextChanged(box, cfg, lib, kws);
+    const out = c.onTextChanged(box, cfg, pack);
     if (out !== null) { box = out; writes++; }
   }
   return { box, writes };
@@ -172,21 +185,21 @@ describe('？！ 回滚重做', () => {
   test('打？再打！ 变成惊讶版', () => {
     const c = new MeowCommitter();
     let box = '真的假的';
-    box = c.onTextChanged(box, CFG, LIB, KWS) ?? box;
+    box = c.onTextChanged(box, CFG, PACK) ?? box;
     box += '？';
-    box = c.onTextChanged(box, CFG, LIB, KWS) ?? box;
+    box = c.onTextChanged(box, CFG, PACK) ?? box;
     assert.equal(box, '真的假的喵？');
     box += '！';
-    const out = c.onTextChanged(box, CFG, LIB, KWS);
+    const out = c.onTextChanged(box, CFG, PACK);
     assert.equal(out, '真的假的喵？！', '没有回滚重做');
   });
 
   test('反向 ！? 也认', () => {
     const c = new MeowCommitter();
     let box = '什么！';
-    box = c.onTextChanged(box, CFG, LIB, KWS) ?? box;
+    box = c.onTextChanged(box, CFG, PACK) ?? box;
     box += '？';
-    assert.equal(c.onTextChanged(box, CFG, LIB, KWS), '什么喵！？');
+    assert.equal(c.onTextChanged(box, CFG, PACK), '什么喵！？');
   });
 
   test('打？之后继续打别的字不回滚', () => {
@@ -219,31 +232,31 @@ describe('颜文字：关键词扫描', () => {
 
 describe('颜文字：标签交集', () => {
   test('谢谢！ 取 感激∩兴奋', () => {
-    const kao = K.select('谢谢', '！', LIB, KWS, null);
+    const kao = K.select('谢谢', '！', PACK, null);
     assert.equal(kao, 'ヾ(=^･ω･^=)ノ');
   });
 
   test('交集为空时关键词优先', () => {
-    const kao = K.select('谢谢', '？', LIB, KWS, null);
+    const kao = K.select('谢谢', '？', PACK, null);
     const entry = LIB.find((e) => e.kao === kao);
     assert.ok(entry.tags.includes('感激'), '应当保关键词的标签: ' + kao);
   });
 
   test('没有关键词时用标点', () => {
-    const kao = K.select('你在吗', '？', LIB, KWS, null);
+    const kao = K.select('你在吗', '？', PACK, null);
     assert.ok(LIB.find((e) => e.kao === kao).tags.includes('疑问'), kao);
   });
 
   test('避开上次用过的那个', () => {
-    const first = K.select('你在吗', '？', LIB, KWS, null);
-    const second = K.select('你在吗', '？', LIB, KWS, first);
+    const first = K.select('你在吗', '？', PACK, null);
+    const second = K.select('你在吗', '？', PACK, first);
     assert.notEqual(second, first);
   });
 
   test('同一句在同样条件下结果稳定', () => {
-    const a = K.select('我今天很开心', '', LIB, KWS, null);
+    const a = K.select('我今天很开心', '', PACK, null);
     for (let i = 0; i < 10; i++) {
-      assert.equal(K.select('我今天很开心', '', LIB, KWS, null), a);
+      assert.equal(K.select('我今天很开心', '', PACK, null), a);
     }
   });
 });
@@ -285,5 +298,77 @@ describe('颜文字：端到端', () => {
     // 「不开心」仍在，但这里验证的是整体行为正确。
     const r = play(['我不开心。'], kcfg);
     assert.ok(r.box.includes('(=；ω；=)'), '应当走难过组: ' + r.box);
+  });
+});
+
+// ════════════════════════════════════ 情绪合成表
+
+describe('情绪合成表', () => {
+  test('困惑撞上叹号 = 惊讶（什么意思！）', () => {
+    assert.equal(K.select('什么意思', '！', PACK, null), '(=ﾟдﾟ=)');
+  });
+
+  test('困惑撞上 ？！ 同样归惊讶', () => {
+    assert.equal(K.select('什么意思', '？！', PACK, null), '(=ﾟдﾟ=)');
+  });
+
+  test('交集非空时轮不到合成表', () => {
+    // 困惑 ∩ 疑问 有货，不该被合成规则劫走
+    assert.equal(K.select('什么意思', '？', PACK, null), '(=･ｪ･=)?');
+  });
+
+  test('没有对应规则时仍按老降级走', () => {
+    // 难过 + ！ 没配合成规则，交集为空 → 保关键词
+    const kao = K.select('好难过', '！', PACK, null);
+    assert.ok(LIB.find((e) => e.kao === kao).tags.includes('难过'), kao);
+  });
+
+  test('@merge 行不会被当成颜文字混进库里', () => {
+    assert.equal(PACK.merges.length, 2);
+    assert.ok(!LIB.some((e) => e.kao.includes('惊讶')), '合成规则被当成颜文字了');
+  });
+});
+
+// ════════════════════════════════════ 省略号
+
+describe('省略号：连打的句号', () => {
+  const kcfg = { ...CFG, enableKaomoji: true };
+  // 不能按空格切 —— (=_ _=) 这类脸自己就含空格
+  const faceOf = (s) => (LIB.find((e) => s.endsWith(e.kao)) || {}).kao;
+
+  test('第二个句号把结果折成英文省略号', () => {
+    assert.equal(play(['我好累。', '。']).box, '本喵好累喵...');
+  });
+
+  test('一次粘进两个句号也一样', () => {
+    assert.equal(play(['我好累。。']).box, '本喵好累喵...');
+  });
+
+  test('第三个句号起被吸收，结果不再变化', () => {
+    const r = play(['我好累。', '。', '。', '。']);
+    assert.equal(r.box, '本喵好累喵...');
+    assert.equal(r.writes, 4, '每次按键都该写回一次（把多余的句号抹掉）');
+  });
+
+  test('省略号走无奈组', () => {
+    const box = play(['今天下雨。', '。'], kcfg).box;
+    const entry = LIB.find((e) => e.kao === faceOf(box));
+    assert.ok(entry && entry.tags.includes('无奈'), box);
+  });
+
+  test('折成省略号不该平白换一张脸', () => {
+    // 回滚时 lastKaomoji 要退回上一格，否则「避开上次」会把重做推到另一个候选
+    const one = play(['我好累。'], kcfg).box;
+    const two = play(['我好累。', '。'], kcfg).box;
+    assert.ok(faceOf(one), '没挑到颜文字，这个测试就是空跑: ' + one);
+    assert.equal(faceOf(two), faceOf(one), one + '  →  ' + two);
+  });
+
+  test('单个句号照旧被吃掉，不受影响', () => {
+    assert.equal(play(['我今天很开心。']).box, '本喵今天很开心喵');
+  });
+
+  test('句号后打别的字就不再合并', () => {
+    assert.equal(play(['我好累。', '真的', '。']).box, '本喵好累喵真的喵');
   });
 });

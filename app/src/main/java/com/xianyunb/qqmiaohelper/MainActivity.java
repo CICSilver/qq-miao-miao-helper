@@ -538,18 +538,13 @@ public class MainActivity extends AppCompatActivity {
         }
         // 走和真实场景完全相同的封句路径（句号确认键 + 冻结前缀），
         // 这样预览里看到的就是实际会发生的事，包括颜文字的挑选。
-        java.util.List<KaomojiLib.Entry> lib =
-                KaomojiLib.parseLib(edKaomojiLib.getText().toString());
-        if (lib.isEmpty()) {
-            lib = KaomojiLib.fallbackLib();
-        }
-        java.util.List<KaomojiLib.KeywordRule> kws =
-                KaomojiLib.parseKeywords(edKaomojiKw.getText().toString());
+        KaomojiLib.Pack pack = KaomojiLib.Pack.of(
+                edKaomojiLib.getText().toString(), edKaomojiKw.getText().toString());
 
         MeowCommitter c = new MeowCommitter();
         MeowEngine.Config cfg = configFromUi();
         String result = raw;
-        String out = c.onTextChanged(raw, cfg, lib, kws);
+        String out = c.onTextChanged(raw, cfg, pack);
         if (out != null) {
             result = out;
         }

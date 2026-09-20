@@ -40,7 +40,6 @@ export function defaultConfig() {
     minSentenceLength: 2,
     rules: [],
     enableKaomoji: true,
-    kaomoji: [],
     protectRegions: true,
   };
 }
@@ -177,12 +176,8 @@ export function transform(input, cfg) {
     text = sb;
   }
 
-  if (cfg.enableKaomoji && cfg.kaomoji && cfg.kaomoji.length > 0) {
-    const n = cfg.kaomoji.length;
-    const idx = ((hashSeed('kao|' + m.text) % n) + n) % n;   // Math.floorMod
-    const pick = cfg.kaomoji[idx];
-    if (pick) text = text + (/\s$/.test(text) ? '' : ' ') + pick;
-  }
+  // 颜文字不再由引擎追加 —— 需要「句尾标点」和「未替换的原文」两个上下文，
+  // 只有 MeowCommitter 封句时才同时握有。见 kaomojilib.mjs。
 
   return unmask(text, m.vault);
 }
@@ -204,45 +199,3 @@ export function parseRules(raw) {
 }
 
 export const isSelfReferential = (r) => !!r.from && r.to.includes(r.from);
-
-// ------------------------------------------------------- MeowRewriter 转写
-
-const COMPOSING_TAIL = /[A-Za-z']{2,}$/;
-const HAS_CJK = /[一-鿿]/;
-
-export function looksComposing(text) {
-  if (!text) return false;
-  const m = text.match(COMPOSING_TAIL);
-  if (!m) return false;
-  return HAS_CJK.test(text.slice(0, text.length - m[0].length));
-}
-
-export class MeowRewriter {
-  constructor() { this.lastOriginal = null; this.lastWritten = null; }
-  reset() { this.lastOriginal = null; this.lastWritten = null; }
-  isEcho(cur) { return cur !== null && cur === this.lastWritten; }
-
-  rewrite(current, cfg, skipComposingCheck = false) {
-    if (current === null || current === undefined || !current.trim()) { this.reset(); return null; }
-    if (this.isEcho(current)) return null;
-    if (!skipComposingCheck && looksComposing(current)) return null;
-
-    let original, reconstructed;
-    if (this.lastWritten === null) {
-      original = current; reconstructed = true;
-    } else if (current.startsWith(this.lastWritten)) {
-      original = (this.lastOriginal === null ? '' : this.lastOriginal)
-        + current.slice(this.lastWritten.length);
-      reconstructed = true;
-    } else {
-      original = current; reconstructed = false;
-    }
-
-    const effective = reconstructed ? cfg : { ...cfg, rules: cfg.rules.filter((r) => !isSelfReferential(r)) };
-    const out = transform(original, effective);
-
-    this.lastOriginal = original;
-    this.lastWritten = out;
-    return out === current ? null : out;
-  }
-}

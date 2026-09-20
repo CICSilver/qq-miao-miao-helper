@@ -41,9 +41,8 @@ public class TextProcessor {
         cfg.suffixBeforePunct = config.isMeowBeforePunct();
 
         cfg.enableKaomoji = config.isEnableEmoticon();
-        cfg.kaomoji = MeowEngine.parseKaomoji(
-                config.getCustomEmoticons(),
-                CatConfig.BUILTIN_EMOTICONS.toArray(new String[0]));
+        // 颜文字的挑选在 KaomojiLib，需要句尾标点与未替换的原文两个上下文，
+        // 只有 MeowCommitter 封句时才同时握有，所以不在这里装配。
 
         return cfg;
     }

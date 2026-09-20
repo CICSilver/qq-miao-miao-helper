@@ -53,8 +53,8 @@ public class MainActivity extends AppCompatActivity {
     private SwitchMaterial swWo;
     private SwitchMaterial swMeow;
     private SwitchMaterial swEmoticon;
-    private Spinner spinnerMode;
-    private EditText edCustom;
+    private EditText edKaomojiLib;
+    private EditText edKaomojiKw;
     private EditText edRules;
     private SwitchMaterial swMeowBefore;
     private SwitchMaterial swMaster;
@@ -126,11 +126,11 @@ public class MainActivity extends AppCompatActivity {
         root.addView(makeCard("功能开关", buildSwitches()));
 
         // 处理模式
-        root.addView(makeCard("处理模式", buildModeSection()));
 
         // 自定义颜文字
         root.addView(makeCard("自定义替换规则", buildRulesSection()));
-        root.addView(makeCard("自定义颜文字", buildCustomSection()));
+        root.addView(makeCard("颜文字库", buildKaomojiLibSection()));
+        root.addView(makeCard("颜文字关键词", buildKaomojiKwSection()));
 
         // 测试
         root.addView(makeCard("测试当前配置", buildTestSection()));
@@ -206,6 +206,7 @@ public class MainActivity extends AppCompatActivity {
         appSwitches.clear();
         for (ChatApps app : ChatApps.values()) {
             SwitchMaterial sw = addSwitch(inner, app.getDisplayName());
+            sw.setOnCheckedChangeListener((b, c) -> saveEnabledApps());
             appSwitches.add(sw);
         }
         TextView hint = new TextView(this);
@@ -222,31 +223,28 @@ public class MainActivity extends AppCompatActivity {
         inner.setOrientation(LinearLayout.VERTICAL);
         swNi = addSwitch(inner, "将「你」替换为「主人」");
         swWo = addSwitch(inner, "将「我」替换为「本喵」");
-        swMeow = addSwitch(inner, "断句加喵");
-        swEmoticon = addSwitch(inner, "消息末尾随机颜文字");
+        swMeow = addSwitch(inner, "句尾加喵");
+        swEmoticon = addSwitch(inner, "每句末尾配一个颜文字");
         swMeowBefore = addSwitch(inner, "喵放在标点之前（真好喵！/ 真好！喵）");
-        return inner;
-    }
 
-    private View buildModeSection() {
-        LinearLayout inner = new LinearLayout(this);
-        inner.setOrientation(LinearLayout.VERTICAL);
-
-        spinnerMode = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_dropdown_item,
-                new String[]{"标点触发（推荐）", "实时处理"});
-        spinnerMode.setAdapter(adapter);
-        inner.addView(spinnerMode);
+        // 即时生效，不需要「保存设置」
+        onToggle(swNi, config::setEnableNi);
+        onToggle(swWo, config::setEnableWo);
+        onToggle(swMeow, config::setEnableMeow);
+        onToggle(swEmoticon, config::setEnableEmoticon);
+        onToggle(swMeowBefore, config::setMeowBeforePunct);
 
         TextView hint = new TextView(this);
-        hint.setText("标点触发：在标点处立即处理（体验更顺滑）\n实时处理：每输入一个字立即处理");
+        hint.setText("提示：中文句号「。」是确认键 —— 打字过程中输入框不会变，"
+                + "打出句号才会把这句转成喵喵语气，句号本身会被吃掉。"
+                + "「？」「！」也会触发，但会保留。");
         hint.setTextSize(12);
         hint.setTextColor(0xFF99AFC5);
-        hint.setPadding(0, dp(8), 0, 0);
+        hint.setPadding(0, dp(10), 0, 0);
         inner.addView(hint);
         return inner;
     }
+
 
     private View buildRulesSection() {
         LinearLayout inner = new LinearLayout(this);
@@ -264,13 +262,82 @@ public class MainActivity extends AppCompatActivity {
         return inner;
     }
 
-    private View buildCustomSection() {
+    private View buildKaomojiLibSection() {
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
-        edCustom = new EditText(this);
-        setTransparentInput(edCustom, "每行一个颜文字，留空用内置库");
-        inner.addView(edCustom);
+        edKaomojiLib = new EditText(this);
+        setTransparentInput(edKaomojiLib, "留空使用内置库");
+        edKaomojiLib.setText(config.getKaomojiLib());
+        edKaomojiLib.addTextChangedListener(watcher(
+                () -> config.setKaomojiLib(edKaomojiLib.getText().toString())));
+        inner.addView(edKaomojiLib);
+        inner.addView(hintText("格式：标签1,标签2 = 颜文字\n一个颜文字可挂多个标签，标签是自由文本，加新情绪不用改代码。\n注意标签必须写在左边 —— 颜文字自己就含 = （猫脸的眼睛）。"));
+        inner.addView(resetButton("恢复内置颜文字库", () -> {
+            edKaomojiLib.setText(config.getDefaultKaomojiLib());
+            config.setKaomojiLib("");
+        }));
         return inner;
+    }
+
+    private View buildKaomojiKwSection() {
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+        edKaomojiKw = new EditText(this);
+        setTransparentInput(edKaomojiKw, "留空使用内置关键词表");
+        edKaomojiKw.setText(config.getKaomojiKeywords());
+        edKaomojiKw.addTextChangedListener(watcher(
+                () -> config.setKaomojiKeywords(edKaomojiKw.getText().toString())));
+        inner.addView(edKaomojiKw);
+        inner.addView(hintText("格式：关键词 = 情绪标签\n右边留空 = 排除短语（命中即弃权，交给标点判断）。\n匹配用最长优先，所以「别难过」会盖过「难过」。"));
+        inner.addView(resetButton("恢复内置关键词表", () -> {
+            edKaomojiKw.setText(config.getDefaultKaomojiKeywords());
+            config.setKaomojiKeywords("");
+        }));
+        return inner;
+    }
+
+    /** 文本框改动即存，不需要「保存设置」 */
+    private android.text.TextWatcher watcher(Runnable onChange) {
+        return new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int a, int b, int c) {
+            }
+
+            @Override
+            public void afterTextChanged(android.text.Editable e) {
+                if (!bindingUi) {
+                    onChange.run();
+                }
+            }
+        };
+    }
+
+    private TextView hintText(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(12);
+        tv.setTextColor(0xFF99AFC5);
+        tv.setPadding(0, dp(8), 0, 0);
+        return tv;
+    }
+
+    private View resetButton(String label, Runnable action) {
+        Button b = roundBtn(label, false);
+        b.setOnClickListener(v -> {
+            bindingUi = true;
+            action.run();
+            bindingUi = false;
+            Toast.makeText(this, "已恢复默认", Toast.LENGTH_SHORT).show();
+        });
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42));
+        p.topMargin = dp(10);
+        b.setLayoutParams(p);
+        return b;
     }
 
     private View buildTestSection() {
@@ -286,19 +353,11 @@ public class MainActivity extends AppCompatActivity {
         tvPreview.setPadding(0, dp(10), 0, dp(12));
         inner.addView(tvPreview);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-
-        Button btnTest = roundBtn("预览", false);
+        // 没有「保存设置」按钮：所有配置改动即时生效，与顶部总开关一致。
+        Button btnTest = roundBtn("预览", true);
         btnTest.setOnClickListener(v -> runTest());
-        row.addView(btnTest, new LinearLayout.LayoutParams(0, dp(46), 1f));
-
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        sp.setMargins(dp(12), 0, 0, 0);
-        Button btnSave = roundBtn("保存设置", true);
-        btnSave.setOnClickListener(v -> saveSettings());
-        row.addView(btnSave, sp);
-        inner.addView(row);
+        inner.addView(btnTest, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         return inner;
     }
 
@@ -400,14 +459,30 @@ public class MainActivity extends AppCompatActivity {
         return d;
     }
 
+    /**
+     * 开关改动即存；回填界面时不算用户操作。
+     *
+     * 不用 java.util.function.Consumer —— 它是 API 24+，本项目 minSdk 是 23
+     * 且未开启 core library desugaring，会在 Android 6.0 上抛 NoSuchMethodError。
+     */
+    private interface BoolSetter {
+        void set(boolean value);
+    }
+
+    private void onToggle(SwitchMaterial sw, BoolSetter setter) {
+        sw.setOnCheckedChangeListener((b, checked) -> {
+            if (!bindingUi) {
+                setter.set(checked);
+            }
+        });
+    }
+
     private void loadSettings() {
         bindingUi = true;
         swNi.setChecked(config.isEnableNi());
         swWo.setChecked(config.isEnableWo());
         swMeow.setChecked(config.isEnableMeow());
         swEmoticon.setChecked(config.isEnableEmoticon());
-        spinnerMode.setSelection(config.getProcessingMode());
-        edCustom.setText(config.getCustomEmoticons());
         edRules.setText(config.getCustomRules());
         swMeowBefore.setChecked(config.isMeowBeforePunct());
         if (swMaster != null) {
@@ -422,27 +497,19 @@ public class MainActivity extends AppCompatActivity {
         bindingUi = false;
     }
 
-    private void saveSettings() {
-        config.setEnableNi(swNi.isChecked());
-        config.setEnableWo(swWo.isChecked());
-        config.setEnableMeow(swMeow.isChecked());
-        config.setEnableEmoticon(swEmoticon.isChecked());
-        config.setProcessingMode(spinnerMode.getSelectedItemPosition() == 1
-                ? CatConfig.MODE_REALTIME : CatConfig.MODE_PUNCTUATION);
-        config.setCustomEmoticons(edCustom.getText().toString());
-        config.setCustomRules(edRules.getText().toString());
-        config.setMeowBeforePunct(swMeowBefore.isChecked());
-        // 保存聊天软件开关
-        java.util.Set<String> enabledApps = new java.util.HashSet<>();
+    /** 聊天软件勾选项即时保存 */
+    private void saveEnabledApps() {
+        if (bindingUi) {
+            return;
+        }
+        java.util.Set<String> enabled = new java.util.HashSet<>();
         ChatApps[] apps = ChatApps.values();
         for (int i = 0; i < apps.length && i < appSwitches.size(); i++) {
             if (appSwitches.get(i).isChecked()) {
-                enabledApps.add(apps[i].name());
+                enabled.add(apps[i].name());
             }
         }
-        config.setEnabledApps(enabledApps);
-        Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show();
-        updateStatus();
+        config.setEnabledApps(enabled);
     }
 
     /** 按界面当前（可能尚未保存的）状态组装引擎参数。 */
@@ -460,9 +527,6 @@ public class MainActivity extends AppCompatActivity {
         cfg.enableSuffix = swMeow.isChecked();
         cfg.suffixBeforePunct = swMeowBefore.isChecked();
         cfg.enableKaomoji = swEmoticon.isChecked();
-        cfg.kaomoji = MeowEngine.parseKaomoji(
-                edCustom.getText().toString(),
-                CatConfig.BUILTIN_EMOTICONS.toArray(new String[0]));
         return cfg;
     }
 
@@ -472,10 +536,25 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请先输入要测试的文字", Toast.LENGTH_SHORT).show();
             return;
         }
-        // 用界面上的当前状态预览，而不是已保存的配置 ——
-        // 否则「先测试、满意再保存」这个流程根本走不通。
-        String result = MeowEngine.transform(raw, configFromUi());
-        tvPreview.setText("原始：\n" + raw + "\n\n处理后：\n" + result);
+        // 走和真实场景完全相同的封句路径（句号确认键 + 冻结前缀），
+        // 这样预览里看到的就是实际会发生的事，包括颜文字的挑选。
+        java.util.List<KaomojiLib.Entry> lib =
+                KaomojiLib.parseLib(edKaomojiLib.getText().toString());
+        if (lib.isEmpty()) {
+            lib = KaomojiLib.fallbackLib();
+        }
+        java.util.List<KaomojiLib.KeywordRule> kws =
+                KaomojiLib.parseKeywords(edKaomojiKw.getText().toString());
+
+        MeowCommitter c = new MeowCommitter();
+        MeowEngine.Config cfg = configFromUi();
+        String result = raw;
+        String out = c.onTextChanged(raw, cfg, lib, kws);
+        if (out != null) {
+            result = out;
+        }
+        tvPreview.setText("原始：\n" + raw + "\n\n发出去会是：\n" + result
+                + (out == null ? "\n\n（没有中文句号，所以不会触发）" : ""));
     }
 
     private void updateStatus() {

@@ -80,8 +80,8 @@ public final class MeowEngine {
 
         public List<Rule> rules = new ArrayList<>();
 
+        /** 是否追加颜文字。实际的挑选在 KaomojiLib，由 MeowCommitter 调用。 */
         public boolean enableKaomoji = true;
-        public List<String> kaomoji = new ArrayList<>();
 
         public boolean protectRegions = true;
     }
@@ -358,17 +358,9 @@ public final class MeowEngine {
             text = sb.toString();
         }
 
-        // 3) 颜文字：由内容决定，同一段文字永远选中同一个，打字时不闪烁
-        if (cfg.enableKaomoji && cfg.kaomoji != null && !cfg.kaomoji.isEmpty()) {
-            // 注意：不能用 Math.floorMod，它是 API 24+，本项目 minSdk 是 23。
-            // hashSeed 可能返回负数，所以要手动取正模。
-            int n = cfg.kaomoji.size();
-            int idx = ((hashSeed("kao|" + m.text) % n) + n) % n;
-            String pick = cfg.kaomoji.get(idx);
-            if (pick != null && !pick.isEmpty()) {
-                text = text + (endsWithWhitespace(text) ? "" : " ") + pick;
-            }
-        }
+        // 颜文字不再由引擎追加 —— 它需要「句尾标点」和「未替换的原文」两个
+        // 上下文来选组，而这两样只有 MeowCommitter 在封句时才同时握有。
+        // 见 KaomojiLib.select / assemble。
 
         return unmask(text, m.vault);
     }
@@ -409,20 +401,4 @@ public final class MeowEngine {
         return rules;
     }
 
-    /** 拆分颜文字库：每行一个。 */
-    public static List<String> parseKaomoji(String raw, String[] fallback) {
-        List<String> pool = new ArrayList<>();
-        if (raw != null) {
-            for (String line : raw.split("\n")) {
-                String t = line.trim();
-                if (!t.isEmpty()) {
-                    pool.add(t);
-                }
-            }
-        }
-        if (pool.isEmpty() && fallback != null) {
-            pool.addAll(Arrays.asList(fallback));
-        }
-        return pool;
-    }
 }

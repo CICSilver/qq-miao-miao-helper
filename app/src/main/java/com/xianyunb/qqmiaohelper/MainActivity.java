@@ -271,7 +271,15 @@ public class MainActivity extends AppCompatActivity {
         edKaomojiLib.addTextChangedListener(watcher(
                 () -> config.setKaomojiLib(edKaomojiLib.getText().toString())));
         inner.addView(edKaomojiLib);
-        inner.addView(hintText("格式：标签1,标签2 = 颜文字\n一个颜文字可挂多个标签，标签是自由文本，加新情绪不用改代码。\n注意标签必须写在左边 —— 颜文字自己就含 = （猫脸的眼睛）。"));
+        inner.addView(hintText("格式：\n"
+                + "  [情绪标签,... | 符号标签,...]   段落头，以下的脸都挂这组标签\n"
+                + "  (=・ω・=)                      一行一张脸\n"
+                + "  (=^ω^=) | (=^w^=)             竖线后可选：纯 ASCII 降级版\n\n"
+                + "情绪标签由句子里的关键词决定，符号标签由句尾标点决定，\n"
+                + "最终候选取两边的交集 —— 两组都挂全，句尾语气才不会丢。\n\n"
+                + "符号标签只有：句号 问号 叹号 问叹 省略号 波浪 爱心\n"
+                + "（波浪和爱心目前不触发）\n\n"
+                + "文件末尾的 @merge 是情绪合成表，管「困惑+叹号=惊讶」这类。"));
         inner.addView(resetButton("恢复内置颜文字库", () -> {
             edKaomojiLib.setText(config.getDefaultKaomojiLib());
             config.setKaomojiLib("");
@@ -288,7 +296,12 @@ public class MainActivity extends AppCompatActivity {
         edKaomojiKw.addTextChangedListener(watcher(
                 () -> config.setKaomojiKeywords(edKaomojiKw.getText().toString())));
         inner.addView(edKaomojiKw);
-        inner.addView(hintText("格式：关键词 = 情绪标签\n右边留空 = 排除短语（命中即弃权，交给标点判断）。\n匹配用最长优先，所以「别难过」会盖过「难过」。"));
+        inner.addView(hintText("格式：关键词 = 情绪标签\n"
+                + "右边留空 = 排除短语（命中即弃权，交给句尾符号判断）。\n"
+                + "匹配用最长优先，所以「别难过」会盖过「难过」，\n"
+                + "「加油站」也不会被当成「加油」。\n\n"
+                + "情绪标签要和颜文字库段落头左半边的对得上，\n"
+                + "对不上不会报错，只是永远选不出东西来。"));
         inner.addView(resetButton("恢复内置关键词表", () -> {
             edKaomojiKw.setText(config.getDefaultKaomojiKeywords());
             config.setKaomojiKeywords("");

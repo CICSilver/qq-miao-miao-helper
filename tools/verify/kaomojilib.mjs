@@ -9,25 +9,49 @@ const splitTags = (s) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
 export const ELLIPSIS = '...';
 
+/** 全部符号标签。段落头省略符号那一半时用它兜底。 */
+export const ALL_SYMBOLS = ['句号', '问号', '叹号', '问叹', '省略号', '波浪', '爱心'];
+
+/**
+ * 解析颜文字库。段落头 `[情绪,... | 符号,...]` 声明标签，之后每行一张脸，
+ * 直到下一个段落头。脸后面可以跟 `| ASCII降级版`。
+ */
 export function parseLib(raw) {
   const out = [];
   if (!raw) return out;
+  let tags = null;
+  let symbols = null;
   for (const line of String(raw).split('\n')) {
     const t = line.trim();
-    // @ 开头是指令行（目前只有 @merge），它也含 '='，不跳过会被当成颜文字
     if (!t || t.startsWith('#') || t.startsWith('@')) continue;
-    const eq = t.indexOf('=');
-    if (eq <= 0) continue;
-    // 标签在左、颜文字在右 —— 颜文字含 '='（猫脸的眼睛），
-    // 放右边 indexOf('=') 才不会切在脸中间。
-    const tags = splitTags(t.slice(0, eq));
-    const kao = t.slice(eq + 1).trim();
-    if (kao && tags.length) out.push({ kao, tags });
+    if (t.startsWith('[') && t.endsWith(']')) {
+      const body = t.slice(1, -1);
+      const bar = body.indexOf('|');
+      if (bar < 0) {
+        // 只写了情绪没写符号：当成「什么句尾都能用」
+        tags = splitTags(body);
+        symbols = ALL_SYMBOLS.slice();
+      } else {
+        tags = splitTags(body.slice(0, bar));
+        symbols = splitTags(body.slice(bar + 1));
+      }
+      continue;
+    }
+    // 还没遇到段落头，或者段落头是空的 —— 没有标签的脸永远选不出来
+    if (!tags || !tags.length || !symbols.length) continue;
+    let kao = t;
+    let ascii = null;
+    const bar = t.indexOf('|');
+    if (bar > 0) {
+      kao = t.slice(0, bar).trim();
+      ascii = t.slice(bar + 1).trim();
+    }
+    if (kao) out.push({ kao, ascii: ascii || kao, tags, symbols });
   }
   return out;
 }
 
-/** 从同一份颜文字库原文里挑出 `@merge 甲 + 乙 = 丙` 这类行 */
+/** 从同一份颜文字库原文里挑出 `@merge 情绪 + 符号 = 情绪` 这类行 */
 export function parseMerges(raw) {
   const out = [];
   if (!raw) return out;
@@ -42,8 +66,8 @@ export function parseMerges(raw) {
     const plus = left.indexOf('+');
     if (plus <= 0 || !result) continue;
     const kwTag = left.slice(0, plus).trim();
-    const punctTag = left.slice(plus + 1).trim();
-    if (kwTag && punctTag) out.push({ kwTag, punctTag, result });
+    const symbol = left.slice(plus + 1).trim();
+    if (kwTag && symbol) out.push({ kwTag, symbol, result });
   }
   return out;
 }
@@ -56,11 +80,12 @@ export function pack(libRaw, kwRaw) {
 }
 
 export function fallbackLib() {
+  const all = ALL_SYMBOLS.slice();
   return [
-    { kao: '(=^･ω･^=)', tags: ['平静', '日常'] },
-    { kao: 'ヽ(=^･ω･^=)丿', tags: ['兴奋', '开心'] },
-    { kao: '(=ʘωʘ=)', tags: ['疑问'] },
-    { kao: '(=ﾟдﾟ=)', tags: ['惊讶'] },
+    { kao: '(=^･ω･^=)', ascii: '(=^.w.^=)', tags: ['平静'], symbols: all },
+    { kao: 'ヽ(=^･ω･^=)丿', ascii: '\\(=^w^=)/', tags: ['开心', '兴奋'], symbols: all },
+    { kao: '(=ʘωʘ=)', ascii: '(=o.o=)', tags: ['困惑'], symbols: all },
+    { kao: '(=ﾟдﾟ=)', ascii: '(=O.O=)', tags: ['惊讶'], symbols: all },
   ];
 }
 
@@ -82,17 +107,21 @@ export function parseKeywords(raw) {
 
 export const isExclusion = (r) => r.tags.length === 0;
 
-/** 句尾标点 → 情绪标签。组合标点归「惊讶」，省略号归「无奈」 */
-export function punctTag(punct) {
-  if (!punct) return '平静';
-  // 省略号单独一档 —— 它里面既没有 ？也没有 ！，落到下面会被当成平静
-  if (punct.includes('.')) return '无奈';
+/**
+ * 句尾标点 → 符号标签。
+ * 空串对应「句号」而不是「没有标点」—— 中文句号是确认键、会被吃掉，
+ * 所以留下空串恰恰说明用户打的是句号。
+ */
+export function symbolOf(punct) {
+  if (!punct) return '句号';
+  // 省略号先判 —— 它里面既没有 ？也没有 ！，落到下面会被当成句号
+  if (punct.includes('.')) return '省略号';
   const q = punct.includes('？') || punct.includes('?');
   const e = punct.includes('！') || punct.includes('!');
-  if (q && e) return '惊讶';
-  if (q) return '疑问';
-  if (e) return '兴奋';
-  return '平静';
+  if (q && e) return '问叹';
+  if (q) return '问号';
+  if (e) return '叹号';
+  return '句号';
 }
 
 /**
@@ -116,12 +145,19 @@ export function scanLastKeyword(body, rules) {
 
 const hasAny = (entry, want) => want.some((t) => entry.tags.includes(t));
 
-/** 情绪合成表命中时的候选；没有可用规则时返回空表 */
-function byMerge(lib, merges, kwTags, pTag) {
+/**
+ * 情绪合成表命中时的候选；没有可用规则时返回空表。
+ * 合成出来的情绪仍然优先和句尾符号取交集 —— 换了情绪不代表可以无视句尾。
+ */
+function byMerge(lib, merges, kwTags, symbol) {
   for (const m of merges || []) {
-    if (m.punctTag !== pTag || !kwTags.includes(m.kwTag)) continue;
-    const hit = lib.filter((e) => e.tags.includes(m.result));
-    if (hit.length) return hit;    // 先写的规则先赢
+    if (m.symbol !== symbol) continue;
+    // kwTag 写 * 表示「不管原本什么情绪」；具体规则写在前面就能赢过它
+    if (m.kwTag !== '*' && !kwTags.includes(m.kwTag)) continue;
+    const all = lib.filter((e) => e.tags.includes(m.result));
+    const fitting = all.filter((e) => e.symbols.includes(symbol));
+    if (fitting.length) return fitting;    // 先写的规则先赢
+    if (all.length) return all;
   }
   return [];
 }
@@ -130,16 +166,16 @@ export function select(body, punct, pk, avoid) {
   if (!pk || !pk.lib.length) return '';
   const lib = pk.lib;
   const kw = scanLastKeyword(body, pk.keywords);
-  const pTag = punctTag(punct);
+  const symbol = symbolOf(punct);
 
   const byKw = kw ? lib.filter((e) => hasAny(e, kw.tags)) : [];
-  const byPunct = lib.filter((e) => e.tags.includes(pTag));
+  const bySymbol = lib.filter((e) => e.symbols.includes(symbol));
 
-  let pool = byKw.filter((e) => byPunct.includes(e));   // 交集
-  // 交集为空时先问合成表：两种情绪叠起来往往是第三种（「什么意思！」= 难以置信）
-  if (!pool.length && kw) pool = byMerge(lib, pk.merges, kw.tags, pTag);
-  if (!pool.length) pool = byKw;                        // 关键词比标点具体
-  if (!pool.length) pool = byPunct;
+  let pool = byKw.filter((e) => bySymbol.includes(e));   // 交集
+  // 交集为空时先问合成表：情绪和句尾叠起来往往是第三种（「什么意思！」= 难以置信）
+  if (!pool.length && kw) pool = byMerge(lib, pk.merges, kw.tags, symbol);
+  if (!pool.length) pool = byKw;                         // 关键词比句尾具体
+  if (!pool.length) pool = bySymbol;
   if (!pool.length) pool = lib;
 
   if (avoid && pool.length > 1) {
@@ -172,16 +208,16 @@ export function assemble(body, punct, kao) {
   const combo = p.length > 1;
   let keep = p;
   if (kp && !combo) {
-    const tag = punctTag(p);
-    const pk = tag === '疑问' ? '?' : (tag === '兴奋' ? '!' : null);
+    const sym = symbolOf(p);
+    const pk = sym === '问号' ? '?' : (sym === '叹号' ? '!' : null);
     if (pk === kp) keep = '';
   }
   return body + keep + ' ' + kao;
 }
 
-/** 句尾是否已带库里的颜文字（防重复叠加） */
+/** 句尾是否已带库里的颜文字（防重复叠加）。ASCII 降级版也算。 */
 export function endsWithKnownKaomoji(text, lib) {
   if (!text || !lib) return false;
   const t = text.trim();
-  return lib.some((e) => e.kao && t.endsWith(e.kao));
+  return lib.some((e) => (e.kao && t.endsWith(e.kao)) || (e.ascii && t.endsWith(e.ascii)));
 }

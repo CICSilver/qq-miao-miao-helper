@@ -21,22 +21,40 @@ const CFG = {
 };
 
 const LIB_RAW = `
-平静,日常 = (=^･ω･^=)
-平静,日常 = (=^･^=)
-兴奋,开心 = ヽ(=^･ω･^=)丿
-疑问 = (=ʘωʘ=)
-疑问,困惑 = (=･ｪ･=)?
-惊讶 = (=ﾟдﾟ=)
-感激 = (=^･ω･^=)♡
-兴奋,感激 = ヾ(=^･ω･^=)ノ
-安慰 = (づ=^･ω･^=)づ
-难过,委屈 = (=；ω；=)
-无奈 = (=ー ー=)
-无奈,困倦 = (=_ _=)
-无奈,困倦 = (=＿ω＿=)
+[平静 | 句号,问号,叹号,省略号]
+(=^･ω･^=) | (=^.w.^=)
+(=^･^=)
 
-@merge 困惑 + 兴奋 = 惊讶
-@merge 困惑 + 惊讶 = 惊讶
+[开心,兴奋 | 叹号]
+ヽ(=^･ω･^=)丿 | \(=^w^=)/
+
+[困惑 | 句号,问号,省略号]
+(=ʘωʘ=)
+
+[困惑 | 问号]
+(=･･=)?
+
+[惊讶 | 叹号,问叹,问号]
+(=ﾟдﾟ=)
+
+[感激 | 句号,叹号]
+(=^･ω･^=)♡
+
+[感激,兴奋 | 叹号]
+ゾ(=^･ω･^=)ノ
+
+[安慰 | 句号,叹号,省略号]
+(づ=^･ω･^=)づ
+
+[难过,委屈 | 句号,问号,叹号,省略号]
+(=；ω；=)
+
+[无奈,困倦 | 句号,省略号]
+(=＿ω＿=)
+(=_ _=)
+
+@merge 困惑 + 叹号 = 惊讶
+@merge 困惑 + 问叹 = 惊讶
 `;
 
 const KW_RAW = `
@@ -55,6 +73,9 @@ const KW_RAW = `
 const PACK = K.pack(LIB_RAW, KW_RAW);
 const LIB = PACK.lib;
 const KWS = PACK.keywords;
+
+/** 按颜文字文本反查它在库里的条目 */
+const entryOf = (kao) => LIB.find((e) => e.kao === kao);
 
 /** 模拟输入框：按步骤喂给 committer，返回最终内容与写回次数 */
 function play(steps, cfg = CFG, pack = PACK) {
@@ -231,20 +252,21 @@ describe('颜文字：关键词扫描', () => {
 });
 
 describe('颜文字：标签交集', () => {
-  test('谢谢！ 取 感激∩兴奋', () => {
-    const kao = K.select('谢谢', '！', PACK, null);
-    assert.equal(kao, 'ヾ(=^･ω･^=)ノ');
+  test('谢谢！取【感激】且【配得上叹号】的脸', () => {
+    const e = entryOf(K.select('谢谢', '！', PACK, null));
+    assert.ok(e.tags.includes('感激'), e.kao);
+    assert.ok(e.symbols.includes('叹号'), e.kao);
   });
 
-  test('交集为空时关键词优先', () => {
-    const kao = K.select('谢谢', '？', PACK, null);
-    const entry = LIB.find((e) => e.kao === kao);
-    assert.ok(entry.tags.includes('感激'), '应当保关键词的标签: ' + kao);
+  test('交集为空时保情绪、舍句尾', () => {
+    // 感激组没配问号的脸，也没有对应的合成规则 → 退回情绪组
+    const e = entryOf(K.select('谢谢', '？', PACK, null));
+    assert.ok(e.tags.includes('感激'), '应当保情绪标签: ' + e.kao);
   });
 
-  test('没有关键词时用标点', () => {
-    const kao = K.select('你在吗', '？', PACK, null);
-    assert.ok(LIB.find((e) => e.kao === kao).tags.includes('疑问'), kao);
+  test('没有关键词时只看句尾符号', () => {
+    const e = entryOf(K.select('你在吗', '？', PACK, null));
+    assert.ok(e.symbols.includes('问号'), e.kao);
   });
 
   test('避开上次用过的那个', () => {
@@ -313,8 +335,10 @@ describe('情绪合成表', () => {
   });
 
   test('交集非空时轮不到合成表', () => {
-    // 困惑 ∩ 疑问 有货，不该被合成规则劫走
-    assert.equal(K.select('什么意思', '？', PACK, null), '(=･ｪ･=)?');
+    // 困惑 ∩ 问号 有货，不该被合成规则劫到惊讶组
+    const e = entryOf(K.select('什么意思', '？', PACK, null));
+    assert.ok(e.tags.includes('困惑'), e.kao);
+    assert.ok(e.symbols.includes('问号'), e.kao);
   });
 
   test('没有对应规则时仍按老降级走', () => {
@@ -350,10 +374,15 @@ describe('省略号：连打的句号', () => {
     assert.equal(r.writes, 4, '每次按键都该写回一次（把多余的句号抹掉）');
   });
 
-  test('省略号走无奈组', () => {
-    const box = play(['今天下雨。', '。'], kcfg).box;
-    const entry = LIB.find((e) => e.kao === faceOf(box));
-    assert.ok(entry && entry.tags.includes('无奈'), box);
+  test('省略号选的脸得配得上省略号', () => {
+    const e = entryOf(faceOf(play(['今天下雨。', '。'], kcfg).box));
+    assert.ok(e && e.symbols.includes('省略号'), String(e && e.kao));
+  });
+
+  test('我好累。。 走 困倦 ∩ 省略号', () => {
+    const e = entryOf(faceOf(play(['我好累。', '。'], kcfg).box));
+    assert.ok(e.tags.includes('困倦'), e.kao);
+    assert.ok(e.symbols.includes('省略号'), e.kao);
   });
 
   test('折成省略号不该平白换一张脸', () => {

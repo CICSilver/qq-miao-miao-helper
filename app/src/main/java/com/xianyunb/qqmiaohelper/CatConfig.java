@@ -22,6 +22,8 @@ public class CatConfig {
     public static final String KEY_ENABLE_MEOW = "enable_meow";
     public static final String KEY_ENABLE_EMOTICON = "enable_emoticon";
     public static final String KEY_ENABLED_APPS = "enabled_apps";
+    /** 用户「见过」哪些聊天软件的开关。升级后新出现的默认打开，见 adoptNewApps */
+    public static final String KEY_KNOWN_APPS = "known_apps";
     /** 自定义替换规则，每行 原文=替换 */
     /** 总开关。关掉后无障碍服务立刻变成空操作，不碰任何输入框。 */
     public static final String KEY_MASTER_ENABLED = "master_enabled";
@@ -45,6 +47,39 @@ public class CatConfig {
     public CatConfig(Context context) {
         appContext = context.getApplicationContext();
         prefs = appContext.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        adoptNewApps();
+    }
+
+    /**
+     * 版本升级时新加的聊天软件默认打开。
+     *
+     * 没有这一步的话，老用户升级上来 enabled_apps 里只有 QQ，新加的微信
+     * 会是关的 —— 看起来就像「支持微信」这件事没生效。用「见过哪些」而不是
+     * 版本号来判断，以后再加软件也不用改这里。
+     */
+    private void adoptNewApps() {
+        java.util.Set<String> known = prefs.getStringSet(KEY_KNOWN_APPS, null);
+        if (known == null && !prefs.contains(KEY_ENABLED_APPS)) {
+            return;     // 全新安装，走 getEnabledApps 的默认值就行
+        }
+        java.util.Set<String> seen = new java.util.HashSet<>(
+                known == null ? java.util.Collections.<String>emptySet() : known);
+        java.util.Set<String> enabled = new java.util.HashSet<>(
+                prefs.getStringSet(KEY_ENABLED_APPS, java.util.Collections.<String>emptySet()));
+        boolean changed = false;
+        for (ChatApps app : ChatApps.values()) {
+            if (!seen.contains(app.name())) {
+                seen.add(app.name());
+                enabled.add(app.name());
+                changed = true;
+            }
+        }
+        if (changed) {
+            prefs.edit()
+                    .putStringSet(KEY_KNOWN_APPS, seen)
+                    .putStringSet(KEY_ENABLED_APPS, enabled)
+                    .apply();
+        }
     }
 
     /** 读 res/raw 里的纯文本默认值。读不到时返回空串，调用方自行兜底。 */
@@ -169,13 +204,20 @@ public class CatConfig {
     }
 
     /**
-     * 获取已启用的软件（按枚举 name 存储）。默认启用 QQ。
+     * 获取已启用的软件（按枚举 name 存储）。默认全开。
+     *
+     * 默认全开是有意的：总开关在最上面，不想用随时关掉；反过来
+     * 「装了却发现在微信里没反应」会让人以为是坏了。
      */
     public java.util.Set<String> getEnabledApps() {
         java.util.Set<String> set = prefs.getStringSet(KEY_ENABLED_APPS, null);
-        if (set == null || set.isEmpty()) {
+        // 只认 null（从没存过）。存过的空集合是用户把勾全取消了，得照办 ——
+        // 把空集合也当成「没设置」的话，全部取消反而会变回全开。
+        if (set == null) {
             java.util.Set<String> def = new java.util.HashSet<>();
-            def.add(ChatApps.QQ.name());
+            for (ChatApps app : ChatApps.values()) {
+                def.add(app.name());
+            }
             return def;
         }
         return new java.util.HashSet<>(set);
@@ -186,6 +228,15 @@ public class CatConfig {
     }
 
     public void setEnabledApps(java.util.Set<String> appNames) {
-        prefs.edit().putStringSet(KEY_ENABLED_APPS, new java.util.HashSet<>(appNames)).apply();
+        // 同时记下「这些软件用户都见过了」，否则下次启动 adoptNewApps
+        // 会把刚被取消勾选的又打开
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (ChatApps app : ChatApps.values()) {
+            seen.add(app.name());
+        }
+        prefs.edit()
+                .putStringSet(KEY_ENABLED_APPS, new java.util.HashSet<>(appNames))
+                .putStringSet(KEY_KNOWN_APPS, seen)
+                .apply();
     }
 }

@@ -154,7 +154,7 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout inner = new LinearLayout(this);
         inner.setOrientation(LinearLayout.VERTICAL);
         TextView tv = new TextView(this);
-        tv.setText("暂停：关掉上方的总开关，或下拉通知栏点「喵化开关」。\n\n彻底停止：系统设置 → 无障碍 → 已安装的服务 → QQ喵喵助手 → 关闭。\n\n完全移除：直接卸载本应用。\n\n注意：卸载 QQ 没有任何作用。改写输入框的是本应用的无障碍服务，它不属于 QQ，卸载 QQ 不会把它一起带走。");
+        tv.setText("暂停：关掉上方的总开关，或下拉通知栏点「喵化开关」。\n\n彻底停止：系统设置 → 无障碍 → 已安装的服务 → QQ喵喵助手 → 关闭。\n\n完全移除：直接卸载本应用。\n\n注意：卸载 QQ 或微信没有任何作用。改写输入框的是本应用的无障碍服务，它不属于这两个应用，卸载它们不会把它一起带走。");
         tv.setTextSize(13);
         tv.setTextColor(0xFFD8E4EE);
         tv.setLineSpacing(0f, 1.3f);
@@ -210,7 +210,7 @@ public class MainActivity extends AppCompatActivity {
             appSwitches.add(sw);
         }
         TextView hint = new TextView(this);
-        hint.setText("勾选要启用喵喵语气的聊天软件");
+        hint.setText("勾选要启用喵喵语气的聊天软件；全部取消等于停用");
         hint.setTextSize(12);
         hint.setTextColor(0xFF99AFC5);
         hint.setPadding(0, dp(6), 0, 0);

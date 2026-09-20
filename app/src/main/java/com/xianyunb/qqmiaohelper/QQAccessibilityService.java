@@ -40,6 +40,8 @@ public class QQAccessibilityService extends AccessibilityService {
     private String cachedLibRaw;
     private String cachedKwRaw;
     private KaomojiLib.Pack pack;
+    /** 上一次处理的软件包名，用来在切换软件时清掉封句状态 */
+    private String lastPkg = "";
 
     private Set<String> enabledPackages = new HashSet<>();
 
@@ -95,6 +97,14 @@ public class QQAccessibilityService extends AccessibilityService {
         String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
         if (!enabledPackages.contains(pkg)) {
             return;
+        }
+
+        // 换了个聊天软件 → 上一个的冻结前缀跟这里的输入框没有关系了。
+        // 内容对不上时 onTextChanged 本来也会自己重置，但那依赖「前缀刚好不匹配」，
+        // 换应用这件事是确定的，直接清掉更稳。
+        if (!pkg.equals(lastPkg)) {
+            lastPkg = pkg;
+            committer.reset();
         }
 
         if (event.getEventType() == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {

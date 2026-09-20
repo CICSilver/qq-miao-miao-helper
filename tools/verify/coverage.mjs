@@ -32,3 +32,18 @@ console.log('  退回情绪组     %d  ← 结果仍然有，只是不体现句�
 console.log('  完全拿不到     0');
 console.log('\n退回关键词组的组合：');
 for (const h of holes) console.log('  ' + h);
+
+// 没有关键词是最常见的情况，单独报一下 —— 这一级出过 bug：
+// 拆轴之后它从「平静组」变成了「所有配得上句尾的脸」，平常话会抽到哭脸。
+console.log('\n没有情绪关键词时（最常见的情况）：');
+if (!PACK.defaultTag) {
+  console.log('  ✗ 没配 @default，会退到符号组 —— 哭脸怒脸都在候选里');
+} else {
+  const d = byTag(PACK.defaultTag);
+  console.log('  默认组 = %s，%d 条', PACK.defaultTag, d.length);
+  for (const s of symbols) {
+    const fit = d.filter((e) => e.symbols.includes(s)).length;
+    const via = fit ? '' : '  （靠合成表或整组兜底）';
+    console.log('    句尾 ' + s.padEnd(4) + ' → ' + fit + ' 条可选' + via);
+  }
+}

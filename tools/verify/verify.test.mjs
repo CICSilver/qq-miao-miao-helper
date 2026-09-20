@@ -53,8 +53,11 @@ const LIB_RAW = `
 (=＿ω＿=)
 (=_ _=)
 
+@default 平静
+
 @merge 困惑 + 叹号 = 惊讶
 @merge 困惑 + 问叹 = 惊讶
+@merge * + 问叹 = 惊讶
 `;
 
 const KW_RAW = `
@@ -348,7 +351,7 @@ describe('情绪合成表', () => {
   });
 
   test('@merge 行不会被当成颜文字混进库里', () => {
-    assert.equal(PACK.merges.length, 2);
+    assert.equal(PACK.merges.length, 3);
     assert.ok(!LIB.some((e) => e.kao.includes('惊讶')), '合成规则被当成颜文字了');
   });
 });
@@ -399,5 +402,46 @@ describe('省略号：连打的句号', () => {
 
   test('句号后打别的字就不再合并', () => {
     assert.equal(play(['我好累。', '真的', '。']).box, '本喵好累喵真的喵');
+  });
+});
+
+// ════════════════════════════════════ 默认组
+
+describe('没有情绪关键词的平常话', () => {
+  // 回归：拆成情绪/符号两个轴之后，「只看符号」从「平静组」悄悄变成了
+  // 「所有配得上这个句尾的脸」，于是一句技术描述抽到了 (=T_T=)。
+  const plain = '加了个符号和关键词判断的语气检查';
+
+  test('一个关键词都不命中', () => {
+    assert.equal(K.scanLastKeyword(plain, KWS), null);
+  });
+
+  test('走默认组，不是全库乱抽', () => {
+    for (const p of ['', '！', '？', '...']) {
+      const e = entryOf(K.select(plain, p, PACK, null));
+      assert.ok(e.tags.includes('平静'), '句尾「' + p + '」选了非平静的脸: ' + e.kao);
+    }
+  });
+
+  test('平常话打 ？！ 走惊讶，不是平静', () => {
+    // 通配合成规则的「不管什么情绪」包含「没有情绪」；
+    // 而且平静组里本来就一张配得上问叹的脸都没有
+    const e = entryOf(K.select(plain, '？！', PACK, null));
+    assert.ok(e.tags.includes('惊讶'), e.kao);
+  });
+
+  test('默认组里优先挑配得上句尾的', () => {
+    const e = entryOf(K.select(plain, '！', PACK, null));
+    assert.ok(e.symbols.includes('叹号'), e.kao);
+  });
+
+  test('有关键词时轮不到默认组', () => {
+    const e = entryOf(K.select('好难过', '', PACK, null));
+    assert.ok(e.tags.includes('难过'), e.kao);
+  });
+
+  test('没配 @default 时退回老行为，仍然有结果', () => {
+    const noDefault = { ...PACK, defaultTag: null };
+    assert.ok(K.select(plain, '！', noDefault, null));
   });
 });

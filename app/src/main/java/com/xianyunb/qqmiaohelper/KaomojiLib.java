@@ -109,11 +109,15 @@ public final class KaomojiLib {
         public final List<Entry> lib;
         public final List<Merge> merges;
         public final List<KeywordRule> keywords;
+        /** 句子没有任何情绪关键词时用哪一组，见 {@link #parseDefaultTag} */
+        public final String defaultTag;
 
-        public Pack(List<Entry> lib, List<Merge> merges, List<KeywordRule> keywords) {
+        public Pack(List<Entry> lib, List<Merge> merges, List<KeywordRule> keywords,
+                    String defaultTag) {
             this.lib = lib;
             this.merges = merges;
             this.keywords = keywords;
+            this.defaultTag = defaultTag;
         }
 
         /** 从两份原文解析；颜文字库为空时退回内置兜底，保证任何时候都有东西可选 */
@@ -122,7 +126,8 @@ public final class KaomojiLib {
             if (lib.isEmpty()) {
                 lib = fallbackLib();
             }
-            return new Pack(lib, parseMerges(libRaw), parseKeywords(kwRaw));
+            return new Pack(lib, parseMerges(libRaw), parseKeywords(kwRaw),
+                    parseDefaultTag(libRaw));
         }
     }
 
@@ -174,6 +179,32 @@ public final class KaomojiLib {
     }
 
     private static final String MERGE_PREFIX = "@merge";
+    private static final String DEFAULT_PREFIX = "@default";
+
+    /**
+     * 解析 {@code @default 平静} —— 句子里一个情绪关键词都没命中时用哪一组。
+     *
+     * 没有这一层的话就会降到「符号组」，而符号组是【所有】配得上这个句尾的脸，
+     * 哭的、生气的、害怕的全在里面等概率抽 —— 一句「今天把接口改完了。」
+     * 抽到一张哭脸，看起来就像标签打错了。没有情绪信号本身就是一种信号。
+     *
+     * @return 配置的标签；没写就返回 null，此时按老路降级
+     */
+    public static String parseDefaultTag(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        for (String line : raw.split("\n")) {
+            String t = line.trim();
+            if (t.startsWith(DEFAULT_PREFIX)) {
+                String v = t.substring(DEFAULT_PREFIX.length()).trim();
+                if (!v.isEmpty()) {
+                    return v;
+                }
+            }
+        }
+        return null;
+    }
 
     /**
      * 解析颜文字库。
@@ -406,13 +437,35 @@ public final class KaomojiLib {
                 pool.add(e);
             }
         }
-        if (pool.isEmpty() && kw != null) {
+        if (pool.isEmpty()) {
             // 交集为空时先问合成表：情绪和句尾叠起来往往是第三种情绪，
-            // 直接保情绪或保句尾都会丢掉这层意思（「什么意思！」= 难以置信）
-            pool = byMerge(lib, pack.merges, kw.tags, symbol);
+            // 直接保情绪或保句尾都会丢掉这层意思（「什么意思！」= 难以置信）。
+            // 没命中关键词时也要问 —— 通配规则的意思是「不管原本什么情绪」，
+            // 而「没有情绪」也在其中：「改完了吗？！」该是惊讶，不是平静。
+            pool = byMerge(lib, pack.merges,
+                    kw == null ? java.util.Collections.<String>emptyList() : kw.tags, symbol);
         }
         if (pool.isEmpty()) {
             pool = byKw;            // 关键词比句尾具体，交集空时保情绪
+        }
+        if (pool.isEmpty() && pack.defaultTag != null) {
+            // 一个情绪关键词都没命中 —— 这本身就说明这是句平常话，
+            // 该走默认组。直接掉到下面的「符号组」的话，哭脸、怒脸、
+            // 害怕的脸全在里面等概率抽，平常话也会配上一张哭脸。
+            List<Entry> byDefault = new ArrayList<>();
+            for (Entry e : lib) {
+                if (e.tags.contains(pack.defaultTag)) {
+                    byDefault.add(e);
+                }
+            }
+            for (Entry e : byDefault) {
+                if (bySymbol.contains(e)) {
+                    pool.add(e);
+                }
+            }
+            if (pool.isEmpty()) {
+                pool = byDefault;   // 默认组里没有配得上这个句尾的，也好过全库乱抽
+            }
         }
         if (pool.isEmpty()) {
             pool = bySymbol;

@@ -72,11 +72,33 @@ export function parseMerges(raw) {
   return out;
 }
 
+/**
+ * 解析 `@default 平静` —— 句子里一个情绪关键词都没命中时用哪一组。
+ * 没有这一层就会降到「符号组」，而符号组是所有配得上这个句尾的脸，
+ * 哭的、生气的全在里面等概率抽。没写返回 null，按老路降级。
+ */
+export function parseDefaultTag(raw) {
+  if (!raw) return null;
+  for (const line of String(raw).split('\n')) {
+    const t = line.trim();
+    if (t.startsWith('@default')) {
+      const v = t.slice('@default'.length).trim();
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
 /** 选颜文字要用的全部数据，打包传递；库为空时退回兜底 */
 export function pack(libRaw, kwRaw) {
   let lib = parseLib(libRaw);
   if (!lib.length) lib = fallbackLib();
-  return { lib, merges: parseMerges(libRaw), keywords: parseKeywords(kwRaw) };
+  return {
+    lib,
+    merges: parseMerges(libRaw),
+    keywords: parseKeywords(kwRaw),
+    defaultTag: parseDefaultTag(libRaw),
+  };
 }
 
 export function fallbackLib() {
@@ -172,9 +194,17 @@ export function select(body, punct, pk, avoid) {
   const bySymbol = lib.filter((e) => e.symbols.includes(symbol));
 
   let pool = byKw.filter((e) => bySymbol.includes(e));   // 交集
-  // 交集为空时先问合成表：情绪和句尾叠起来往往是第三种（「什么意思！」= 难以置信）
-  if (!pool.length && kw) pool = byMerge(lib, pk.merges, kw.tags, symbol);
+  // 交集为空时先问合成表：情绪和句尾叠起来往往是第三种（「什么意思！」= 难以置信）。
+  // 没命中关键词时也要问 —— 通配规则的「不管什么情绪」包含「没有情绪」
+  if (!pool.length) pool = byMerge(lib, pk.merges, kw ? kw.tags : [], symbol);
   if (!pool.length) pool = byKw;                         // 关键词比句尾具体
+  if (!pool.length && pk.defaultTag) {
+    // 一个情绪关键词都没命中 —— 这本身就说明是句平常话，该走默认组。
+    // 直接掉到符号组的话，哭脸怒脸全在里面等概率抽。
+    const byDefault = lib.filter((e) => e.tags.includes(pk.defaultTag));
+    pool = byDefault.filter((e) => bySymbol.includes(e));
+    if (!pool.length) pool = byDefault;
+  }
   if (!pool.length) pool = bySymbol;
   if (!pool.length) pool = lib;
 

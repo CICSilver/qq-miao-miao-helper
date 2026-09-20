@@ -81,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         updateStatus();
+        refreshDiag();
     }
 
     private void setupWindow() {
@@ -136,6 +137,7 @@ public class MainActivity extends AppCompatActivity {
         root.addView(makeCard("测试当前配置", buildTestSection()));
 
         root.addView(makeCard("如何彻底停用", buildStopSection()));
+        root.addView(makeCard("诊断日志", buildDiagSection()));
 
         // 铭牌
         TextView footer = new TextView(this);
@@ -148,6 +150,96 @@ public class MainActivity extends AppCompatActivity {
 
         scroll.addView(root);
         return scroll;
+    }
+
+    private TextView tvDiag;
+
+    /**
+     * 诊断日志。
+     *
+     * 存在的理由：无障碍服务「自己关掉了」有三种可能 —— 崩溃、被系统停用、
+     * 进程被杀，在手机上看起来一模一样，但日志里长得完全不同。让用户为了
+     * 一个自用小工具去装 adb 抓 logcat 不现实，所以直接显示在这里，
+     * 一键复制就能发出来。判断方法见下面的提示文字。
+     */
+    private View buildDiagSection() {
+        LinearLayout inner = new LinearLayout(this);
+        inner.setOrientation(LinearLayout.VERTICAL);
+
+        inner.addView(hintText("服务如果又自己关掉了，看最后几行：\n"
+                + "  有「!! 未捕获异常」→ 崩溃，把堆栈发出来\n"
+                + "  有「服务解绑」    → 系统主动停用的，不是崩溃\n"
+                + "  什么都没有        → 进程被整个杀掉了（多半是省电策略）\n"
+                + "还可以看「事件 type=」有没有出现：没有就说明系统压根没把\n"
+                + "输入事件发给服务。"));
+
+        tvDiag = new TextView(this);
+        tvDiag.setTextSize(11);
+        tvDiag.setTextColor(0xFFD8E4EE);
+        tvDiag.setTypeface(Typeface.MONOSPACE);
+        tvDiag.setPadding(dp(8), dp(8), dp(8), dp(8));
+        tvDiag.setBackgroundColor(0x33000000);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(tvDiag);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(200));
+        lp.topMargin = dp(8);
+        inner.addView(sv, lp);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        rp.topMargin = dp(8);
+        inner.addView(row, rp);
+
+        row.addView(diagButton("刷新", new Runnable() {
+            @Override
+            public void run() {
+                refreshDiag();
+            }
+        }));
+        row.addView(diagButton("复制全部", new Runnable() {
+            @Override
+            public void run() {
+                String all = MeowLog.read(MainActivity.this);
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("miao-diag", all));
+                Toast.makeText(MainActivity.this, "已复制 " + all.length() + " 个字符",
+                        Toast.LENGTH_SHORT).show();
+            }
+        }));
+        row.addView(diagButton("清空", new Runnable() {
+            @Override
+            public void run() {
+                MeowLog.clear(MainActivity.this);
+                refreshDiag();
+            }
+        }));
+        return inner;
+    }
+
+    private Button diagButton(String label, final Runnable action) {
+        Button b = roundBtn(label, false);
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                action.run();
+            }
+        });
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        p.rightMargin = dp(6);
+        b.setLayoutParams(p);
+        return b;
+    }
+
+    private void refreshDiag() {
+        if (tvDiag == null) {
+            return;
+        }
+        String all = MeowLog.read(this);
+        tvDiag.setText(all.isEmpty() ? "（还没有记录）" : all);
     }
 
     private View buildStopSection() {

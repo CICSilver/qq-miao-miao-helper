@@ -50,8 +50,9 @@ public class QQAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        MeowLog.init(this);
         reloadConfig();
-        Log.d(TAG, "无障碍服务已连接：监听软件包 = " + enabledPackages);
+        MeowLog.w("服务已连接，监听 = " + enabledPackages);
     }
 
     private void reloadConfig() {
@@ -81,6 +82,26 @@ public class QQAccessibilityService extends AccessibilityService {
      * 每次按键都要读两个 raw 资源再比 24K 个字符，事件回调因此变慢，
      * 慢到一定程度系统就会把无障碍服务停用。
      */
+    /**
+     * 开头若干个事件记到诊断日志里，之后就闭嘴。
+     *
+     * 为什么要有预算：这是按键热路径，无节制地往文件里写就又变成
+     * 「每次按键都做 IO」——正是之前把服务拖死的那个问题。而诊断真正
+     * 需要回答的只是「事件到底有没有到」，开头几十条足够了。
+     */
+    private int traceBudget = 40;
+
+    private void traceEvent(int type, String pkg) {
+        if (traceBudget <= 0) {
+            return;
+        }
+        traceBudget--;
+        boolean listened = enabledPackages.contains(pkg);
+        MeowLog.w("事件 type=" + type + " pkg=" + pkg
+                + (listened ? "" : "（不在监听列表，丢弃）")
+                + (traceBudget == 0 ? "   ← 事件记录到此为止，后面不再记" : ""));
+    }
+
     private void ensureLoaded() {
         int v = config.getVersion();
         if (pack != null && v == cachedVersion) {
@@ -99,7 +120,7 @@ public class QQAccessibilityService extends AccessibilityService {
         try {
             handleEvent(event);
         } catch (Throwable t) {
-            Log.e(TAG, "处理事件时出错，已忽略", t);
+            MeowLog.w("!! 处理事件时出错（已吸掉，服务继续）", t);
             committer.reset();
         }
     }
@@ -116,6 +137,7 @@ public class QQAccessibilityService extends AccessibilityService {
         }
 
         String pkg = event.getPackageName() == null ? "" : event.getPackageName().toString();
+        traceEvent(event.getEventType(), pkg);
         if (!enabledPackages.contains(pkg)) {
             return;
         }
@@ -168,9 +190,10 @@ public class QQAccessibilityService extends AccessibilityService {
         ensureLoaded();
         String out = committer.onTextChanged(raw, cachedCfg, pack);
         if (out == null) {
+            Log.v(TAG, "不需要改写: " + raw);
             return;     // 没有封句，输入框保持不动
         }
-        Log.d(TAG, "封句[" + pkg + "]: '" + raw + "' -> '" + out + "'");
+        MeowLog.w("封句[" + pkg + "] " + raw + "  ->  " + out);
         setNodeText(input, out);
     }
 
@@ -248,12 +271,23 @@ public class QQAccessibilityService extends AccessibilityService {
 
     @Override
     public void onInterrupt() {
-        Log.d(TAG, "无障碍服务被中断");
+        MeowLog.w("服务被中断（onInterrupt）");
+    }
+
+    /**
+     * 这三个收尾记录是诊断的关键：能走到这里，说明是【系统主动停用】服务，
+     * 而不是崩溃、也不是进程被直接杀掉。三种死法在手机上看起来一模一样，
+     * 但日志里长得完全不同 —— 见 MeowLog 的类注释。
+     */
+    @Override
+    public boolean onUnbind(Intent intent) {
+        MeowLog.w("服务解绑（onUnbind）—— 系统把它停用了");
+        return super.onUnbind(intent);
     }
 
     @Override
-    public boolean onUnbind(Intent intent) {
-        Log.d(TAG, "无障碍服务解绑");
-        return super.onUnbind(intent);
+    public void onDestroy() {
+        MeowLog.w("服务销毁（onDestroy）");
+        super.onDestroy();
     }
 }
